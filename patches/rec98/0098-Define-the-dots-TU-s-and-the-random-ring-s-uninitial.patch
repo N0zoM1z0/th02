@@ -1,0 +1,112 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:42:49 +0100
+Subject: [PATCH] Define the dots TU's and the random ring's uninitialized
+ variables in C++
+
+---
+ th02/main/dots.cpp | 25 +++++++++++++++----------
+ th02/main_rr.cpp   |  4 ++++
+ th02_main.asm      | 24 +-----------------------
+ 3 files changed, 20 insertions(+), 33 deletions(-)
+
+diff --git a/th02/main/dots.cpp b/th02/main/dots.cpp
+index 87ca36f2..8f314242 100644
+--- a/th02/main/dots.cpp
++++ b/th02/main/dots.cpp
+@@ -34,14 +34,21 @@ struct dot_t {
+ 
+ static const int DOT_COUNT = 30;
+ 
+-extern dot_t dots[DOT_COUNT];
+-extern int16_t word_1FFF0; // Initial speed
+-extern int16_t word_1FFF2;
+-extern int16_t word_1FFF4;
+-extern int16_t word_1FFF6;
+-extern uint8_t byte_1FFF8;
+-extern uint8_t byte_1FFF9;
+-extern int8_t byte_1FFFA;
++// Uninitialized data, in the original order
++#pragma option -a2
++int16_t word_1FFF0; // Initial speed
++int16_t word_1FFF2;
++int16_t word_1FFF4;
++int16_t word_1FFF6;
++uint8_t byte_1FFF8;
++uint8_t byte_1FFF9;
++int8_t byte_1FFFA;
++dot_t dots[DOT_COUNT];
++screen_x_t circle_dot_left;
++vram_y_t circle_dot_top;
++uint8_t byte_20168;
++uint8_t byte_20169;
++#pragma option -a-
+ 
+ // Leftmost [size] bits set, for each dot size.
+ extern const uint8_t CIRCLE_DOT_PATTERNS[] = {
+@@ -49,8 +56,6 @@ extern const uint8_t CIRCLE_DOT_PATTERNS[] = {
+ };
+ 
+ extern bool reduce_effects;
+-extern uint8_t byte_20168;
+-extern uint8_t byte_20169;
+ 
+ // ZUN landmine: Called with a near call from _TEXT into SHARED, which only
+ // works as long as vector2() stays within 64 KiB of _TEXT's frame.
+diff --git a/th02/main_rr.cpp b/th02/main_rr.cpp
+index 07a89617..77f1cd01 100644
+--- a/th02/main_rr.cpp
++++ b/th02/main_rr.cpp
+@@ -10,6 +10,10 @@
+ #include "libs/master.lib/master.hpp"
+ #include "th02/math/randring.hpp"
+ 
++// Uninitialized data
++uint8_t randring[RANDRING_SIZE];
++uint8_t randring_p;
++
+ void near randring_fill(void)
+ {
+ 	int i = 0;
+diff --git a/th02_main.asm b/th02_main.asm
+index d3df5f9b..307c4137 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -35,6 +35,7 @@ include th02/sprites/main_pat.inc
+ 	extern _memcpy:proc
+ 
+ playperf_min = -6
++RANDRING_SIZE = 256
+ BOMB_CIRCLE_FRAMES = 32
+ STONE_COUNT = 5
+ 
+@@ -649,29 +650,6 @@ include th02/snd/load[bss].asm
+ public _mpn_images, _mpn_palette
+ _mpn_images	dd ?
+ _mpn_palette	palette_t <?>
+-public _word_1FFF0
+-_word_1FFF0	dw ?
+-public _word_1FFF2
+-_word_1FFF2	dw ?
+-public _word_1FFF4
+-_word_1FFF4	dw ?
+-public _word_1FFF6
+-_word_1FFF6	dw ?
+-public _byte_1FFF8
+-_byte_1FFF8	db ?
+-public _byte_1FFF9, _byte_1FFFA
+-_byte_1FFF9	db ?
+-_byte_1FFFA	db ?
+-		db ?
+-public _dots
+-_dots	db (30 * 12) dup(?)
+-public _circle_dot_left, _circle_dot_top
+-_circle_dot_left	dw ?
+-_circle_dot_top	dw ?
+-public _byte_20168, _byte_20169
+-_byte_20168	db ?
+-_byte_20169	db ?
+-include th02/math/randring[bss].asm
+ 
+ POINTNUM_W = 8
+ POINTNUM_H = 8

@@ -3,7 +3,7 @@
 ## State
 
 - OP.EXE, MAIN.EXE, MAINE.EXE and ZUN.COM are identical to the originals as
-  whole files, from a cold build of the patch series (`session5-cold13`).
+  whole files, from a cold build of the patch series (`session5-cold14`).
 - Work lives on branch `th02-recon` of the ReC98 worktree
   `.analysis/work/rec98` and is exported as `patches/rec98/*.patch`
   (`git format-patch b6ba5b0a52..th02-recon`). `scripts/build_th02.py`
@@ -25,9 +25,11 @@ All ZUN C code in MAIN is C++. What remains assembly:
   `th02_*.asm` is master.lib only. Shared TUs are compiled once for every
   binary, so shared data had to sit where it fits all of them
   (`keydelay.cpp`, `frmdely1`'s neighbours `maine022.cpp`/`main02_2.cpp`,
-  pfopen's data in `pf.asm`). Uninitialized variables are C++ from the bullet
-  TU (which also defines `sparks`) to the end of MAIN's link; the earlier
-  ones are still `.data?` in `th02_main.asm`. Unlabeled gaps were real data:
+  pfopen's data in `pf.asm`). All of MAIN's game-specific uninitialized
+  variables are C++ too. `.data?` in `th02_main.asm` keeps master.lib's and
+  five blocks of TUs shared with TH01/TH03-05 (`vram_planes`, `pi_slots`,
+  `input_sense`, `snd`, `load`); ReC98 compiles each shared source once for
+  every game, so they need TH02-only owners first. Unlabeled gaps were real data:
   oversized arrays (the bomb TU's 50-element tables) or unused variables
   (`map_unused`, `tile_ring_unused`); TCC aligns neither byte-sized enums
   nor character arrays under `-a2`, but does align structs.
@@ -185,9 +187,5 @@ boundaries, which the target's relocation table records:
 
 ## Next useful actions
 
-1. Uninitialized variables: continue from the end of `th02_main.asm`'s
-   `.data?`: the shared game/boss state before the bullet TU (`quit` …
-   `word_20686`) needs an owner first. TCC emits
-   them in definition order; pads inside a TU mean `-a2` around the
-   definitions, and an odd-aligned first variable means the TU started
-   earlier (`map_length` in main_05).
+1. The five shared BSS blocks above, in all three EXEs (same order in each),
+   if a TH02-only home can be justified.

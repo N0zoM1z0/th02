@@ -1,0 +1,182 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:41:30 +0100
+Subject: [PATCH] Define the shot TU's uninitialized variables in C++
+
+---
+ th02/main/player/player.hpp |  5 ++-
+ th02/main/player/shot.cpp   | 56 ++++++++++++++++++++++++++++
+ th02_main.asm               | 74 -------------------------------------
+ 3 files changed, 59 insertions(+), 76 deletions(-)
+
+diff --git a/th02/main/player/player.hpp b/th02/main/player/player.hpp
+index ebd87939..b865d7e9 100644
+--- a/th02/main/player/player.hpp
++++ b/th02/main/player/player.hpp
+@@ -89,11 +89,12 @@ inline screen_x_t player_center_y(void) {
+ 
+ extern main_patnum_t player_option_patnum;
+ 
+-extern enum {
++enum player_hit_t {
+ 	PLAYER_NOT_HIT = false,
+ 	PLAYER_HIT = true,
+ 	PLAYER_HIT_GAMEOVER = 0xFF,
+-} player_is_hit;
++};
++extern player_hit_t player_is_hit;
+ #else
+ extern bool player_is_hit;
+ #endif
+diff --git a/th02/main/player/shot.cpp b/th02/main/player/shot.cpp
+index 4960155d..35773be9 100644
+--- a/th02/main/player/shot.cpp
++++ b/th02/main/player/shot.cpp
+@@ -29,6 +29,62 @@ uint8_t byte_1E502 = 0;
+ uint8_t scroll_speed_this_frame = 0;
+ extern uint8_t byte_2034E;
+ 
++// Uninitialized data, in the original order
++// -----------------------------------------
++
++pixel_length_8_t scroll_speed;
++uint8_t scroll_cycle;
++vram_y_t scroll_line;
++int scroll_unused;
++vram_offset_t scroll_line_vo;
++int tile_rows_scrolled;
++int16_t tile_row_scrolled;
++uint8_t byte_2034E;
++uint8_t byte_2034F; // ZUN bloat: Unused.
++uint8_t shot_c_cycle;
++uint8_t shot_frames[SHOT_COUNT];
++shot_t shots[SHOT_COUNT];
++int shot_target_left;
++int shot_target_top;
++int shot_target_left_unused;
++uint8_t option_shots_active;
++uint8_t byte_205DF;
++uint8_t byte_205E0;
++int shot_slot;
++int shot_top_new;
++screen_x_t player_left_on_page[PAGE_COUNT];
++screen_y_t player_top_on_page[PAGE_COUNT];
++screen_x_t near* player_left_on_back_page;
++screen_y_t near* player_top_on_back_page;
++screen_x_t near* player_option_left_left_on_back_page;
++screen_y_t near* player_option_left_top_on_back_page;
++screen_point_t player_topleft;
++screen_point_t player_option_left_topleft[PAGE_COUNT];
++void (near *playchar_shot_func)(void);
++player_hit_t player_is_hit;
++unsigned char player_invincibility_time;
++bool player_invincible_via_bomb;
++bool quit;
++uint8_t stage_miss_count;
++uint8_t miss_frame;
++
++// All values are signed. (Yes, allowing you to invert the controls with
++// negative values!)
++int8_t playchar_speed_aligned_x;
++int8_t playchar_speed_aligned_y;
++int8_t playchar_speed_diagonal_x;
++int8_t playchar_speed_diagonal_y;
++
++uint8_t shot_max_param_1;
++uint8_t shot_max_param_2;
++int8_t shot_max_spread;
++uint8_t byte_20611;
++uint32_t stage_frame;
++int midboss_tile_row;
++page_t page_back;
++page_t page_front;
++// -----------------------------------------
++
+ void sub_CA1C(void)
+ {
+ 	scroll_speed = 1;
+diff --git a/th02_main.asm b/th02_main.asm
+index 103091ee..c547f889 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -701,80 +701,6 @@ CPointnums struc
+ CPointnums ends
+ _pointnums	CPointnums <?>
+ 
+-public _scroll_speed, _scroll_cycle, _scroll_line, _scroll_unused
+-_scroll_speed	db ?
+-_scroll_cycle	db ?
+-_scroll_line	dw ?
+-_scroll_unused	dw ?
+-public _scroll_line_vo
+-_scroll_line_vo	dw ?
+-public _tile_rows_scrolled
+-_tile_rows_scrolled	dw ?
+-public _tile_row_scrolled
+-_tile_row_scrolled	dw ?
+-public _byte_2034E
+-_byte_2034E	db ?
+-		db ?
+-public _shot_c_cycle
+-_shot_c_cycle	db ?
+-public _shot_frames
+-_shot_frames	db 38 dup(?)
+-		db ?
+-public _shots
+-_shots	db 608 dup(?)
+-public _shot_target_left
+-_shot_target_left	dw ?
+-public _shot_target_top
+-_shot_target_top	dw ?
+-public _shot_target_left_unused
+-_shot_target_left_unused	dw ?
+-public _option_shots_active
+-_option_shots_active	db ?
+-public _byte_205DF
+-_byte_205DF	db ?
+-public _byte_205E0
+-_byte_205E0	db ?
+-		db ?
+-public _shot_slot
+-_shot_slot	dw ?
+-public _shot_top_new
+-_shot_top_new	dw ?
+-public _player_left_on_page, _player_top_on_page
+-public _player_left_on_back_page, _player_top_on_back_page
+-public _player_option_left_left_on_back_, _player_option_left_top_on_back_p
+-_player_left_on_page	dw 2 dup(?)
+-_player_top_on_page 	dw 2 dup(?)
+-_player_left_on_back_page	dw ?
+-_player_top_on_back_page 	dw ?
+-_player_option_left_left_on_back_	dw ?
+-_player_option_left_top_on_back_p	dw ?
+-public _player_topleft, _player_option_left_topleft
+-_player_topleft	Point <?>
+-_player_option_left_topleft	Point 2 dup(<?>)
+-public _playchar_shot_func
+-_playchar_shot_func	dw ?
+-include th01/main/player_is_hit[bss].asm
+-public _player_invincibility_time, _player_invincible_via_bomb
+-public _quit, _stage_miss_count, _miss_frame
+-_player_invincibility_time	db ?
+-_player_invincible_via_bomb	db ?
+-_quit	db ?
+-_stage_miss_count	db ?
+-_miss_frame	db ?
+-include th02/main/player/speed[bss].asm
+-public _shot_max_param_1
+-_shot_max_param_1	db ?
+-public _shot_max_param_2
+-_shot_max_param_2	db ?
+-public _shot_max_spread
+-_shot_max_spread	db ?
+-public _byte_20611
+-_byte_20611	db ?
+-public _stage_frame
+-_stage_frame	dd ?
+-public _midboss_tile_row
+-_midboss_tile_row	dw ?
+-include th02/hardware/pages[bss].asm
+ 
+ BULLET_COUNT = 150
+ 
