@@ -1,0 +1,1879 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 22:04:29 +0100
+Subject: [PATCH] [th02/main] Decompile the stage enemy script interpreter,
+ spawner and movement helpers
+
+The enemy TU starts with a null callback at 0x16A66, which keeps the -a2
+switch tables of enemy_script_run() at the original even offset. A
+following read of the same far array element reuses ES only when no jump
+label sits between the two reads.
+---
+ th02/main/enemy/enemy.cpp |  422 +++++++++++-
+ th02/main/enemy/enemy.hpp |    8 +-
+ th02_main.asm             | 1358 +------------------------------------
+ 3 files changed, 431 insertions(+), 1357 deletions(-)
+
+diff --git a/th02/main/enemy/enemy.cpp b/th02/main/enemy/enemy.cpp
+index 4e6fb0c7..88658525 100644
+--- a/th02/main/enemy/enemy.cpp
++++ b/th02/main/enemy/enemy.cpp
+@@ -4,7 +4,7 @@
+  * MAIN.EXE
+  */
+ 
+-#pragma option -zCBOSS_5_TEXT -zPmain_03 -G
++#pragma option -zCBOSS_5_TEXT -zPmain_03 -G -a2
+ 
+ #include "platform.h"
+ #include "x86real.h"
+@@ -15,6 +15,8 @@
+ #include "th02/v_colors.hpp"
+ #include "th02/core/globals.hpp"
+ #include "th02/hardware/pages.hpp"
++#include "th02/math/randring.hpp"
++#include "th02/math/vector.hpp"
+ #include "th02/snd/snd.h"
+ #include "th02/main/playfld.hpp"
+ #include "th02/main/score.hpp"
+@@ -25,6 +27,7 @@
+ #include "th02/main/item/item.hpp"
+ #include "th02/main/player/player.hpp"
+ #include "th02/main/tile/tile.hpp"
++#include "th02/main/midboss/midboss.hpp"
+ 
+ extern screen_x_t shot_target_left;
+ extern screen_y_t shot_target_top;
+@@ -33,8 +36,421 @@ int pascal near shots_hittest(
+ 	screen_x_t left, screen_y_t top, pixel_t w, pixel_t h
+ );
+ void pascal items_add(screen_x_t left, screen_y_t top, int type);
+-void pascal near enemy_aimed_pellet_add(unsigned char angle);
+-int near enemy_script_run(void);
++
++static const int STAGE_LINE_COLUMNS = 49;
++
++extern int16_t far *stage_lines[STAGE_LINE_COLUMNS];
++extern int stage_line_count;
++extern int stage_line_cur;
++extern uint8_t scroll_speed_this_frame;
++extern int tile_rows_scrolled;
++extern void (far *farfp_26C3C)(void);
++extern void (far *farfp_26C40)(void);
++
++// Script of the enemy currently being updated.
++extern unsigned char near *enemy_script;
++
++void enemies_nop(void)
++{
++}
++
++void sub_16A6B(void)
++{
++	int i;
++	for(i = 0; i < ENEMY_COUNT; i++) {
++		enemies[i].flag = EF_FREE;
++	}
++	stage_line_cur = 0;
++}
++
++void sub_16A8A(void)
++{
++	farfp_26C3C = enemies_nop;
++	farfp_26C40 = enemies_nop;
++}
++
++void pascal near enemy_aimed_pellet_add(unsigned char angle)
++{
++	bullets_add_pellet(
++		(enemy_formation->bullet_offset.x + *enemy_left_on_back_page),
++		(enemy_formation->bullet_offset.y + *enemy_top_on_back_page),
++		angle,
++		enemy_cur->bullet_group,
++		enemy_cur->bullet_speed
++	);
++}
++
++void near enemy_move(void)
++{
++	*enemy_left_on_back_page += *enemy_velocity_x;
++	*enemy_top_on_back_page += *enemy_velocity_y;
++}
++
++void near enemy_move_aimed(void)
++{
++	screen_y_t player_center_y;
++	int vector_x;
++	int vector_y;
++
++	player_center_y = (player_topleft.y + 16);
++	vector2_between_plus(
++		*enemy_left_on_back_page,
++		*enemy_top_on_back_page,
++		(player_topleft.x + 24),
++		player_center_y,
++		0x00,
++		vector_x,
++		vector_y,
++		enemy_script[enemy_cur->script_ip + 2]
++	);
++	*enemy_velocity_x = vector_x;
++	*enemy_velocity_y = vector_y;
++	*enemy_left_on_back_page += vector_x;
++	*enemy_top_on_back_page += vector_y;
++}
++
++void pascal near enemy_move_polar(int param_offset, int angle_delta)
++{
++	int vector_x;
++	int vector_y;
++	unsigned char angle;
++	register int p;
++
++	p = (enemy_cur->script_ip + param_offset);
++	if((enemy_cur->kill_frame % enemy_script[p + 1]) == 0) {
++		enemy_cur->loop_i += angle_delta;
++	}
++	angle = (enemy_script[p] + enemy_cur->loop_i);
++	vector2(vector_x, vector_y, angle, enemy_script[p + 2]);
++	*enemy_left_on_back_page += vector_x;
++	*enemy_top_on_back_page += vector_y;
++	*enemy_velocity_x = vector_x;
++	*enemy_velocity_y = vector_y;
++}
++
++void near enemy_move_polar_swing(void)
++{
++	screen_x_t far *left;
++	screen_y_t far *top;
++	int vector_x;
++	int vector_y;
++	int sign;
++	unsigned char angle;
++	register int p;
++
++	left = enemy_left_on_back_page;
++	top = enemy_top_on_back_page;
++	p = (enemy_cur->script_ip + 2);
++	sign = ((enemy_script[p++] == 0) ? -1 : 1);
++	angle = (enemy_script[p] + enemy_cur->loop_i);
++	p++;
++	enemy_cur->loop_i += (enemy_script[p] * sign);
++	p++;
++	vector2(vector_x, vector_y, angle, enemy_script[p]);
++	*left += vector_x;
++	*top += vector_y;
++	*enemy_velocity_x = vector_x;
++	*enemy_velocity_y = vector_y;
++}
++
++void pascal near enemy_add(
++	screen_x_t left, screen_y_t top, int slot, int formation
++)
++{
++	enemies[slot].flag = EF_ALIVE;
++	enemies[slot].pos[page_back].x = left;
++	enemies[slot].pos[page_back].y = top;
++	enemies[slot].cel = 0;
++	enemies[slot].script_ip = 0;
++	enemies[slot].formation = formation;
++	enemies[slot].kill_frame = 0;
++	enemies[slot].age = randring2_next8();
++	enemies[slot].loop_i = 0;
++	enemies[slot].hittest_disabled = false;
++	enemies[slot].player_collision_disabled = false;
++	enemies[slot].spawned_left = ((left < 208) ? 1 : 0);
++	enemies[slot].loop_j = 0;
++	enemies[slot].clip_y = false;
++	enemies[slot].anim_mode = 1;
++	enemies[slot].dying = false;
++	enemies[slot].damage = 0;
++
++	// ZUN bug: Should be `<=`.
++	if(enemy_count < slot) {
++		enemy_count = (slot + 1);
++	}
++}
++
++void sub_16D9B(void)
++{
++	int formation;
++	screen_y_t top;
++	register int slot;
++	register int column;
++
++	if(stage_line_cur < stage_line_count) {
++		if(stage_lines[0][stage_line_cur] == tile_rows_scrolled) {
++			for(column = 1; column < STAGE_LINE_COLUMNS; column++) {
++				if(stage_lines[column][stage_line_cur] != -1) {
++					formation = stage_lines[column][stage_line_cur];
++					top = stage_formations[formation].unknown_00[1];
++					if(midboss_active) {
++						continue;
++					}
++					for(slot = 0; slot < ENEMY_COUNT; slot++) {
++						if(enemies[slot].flag == EF_FREE) {
++							enemy_add(((column * 8) + 16), top, slot, formation);
++							break;
++						}
++					}
++				}
++			}
++			stage_line_cur++;
++		}
++	}
++}
++
++int near enemy_script_run(void)
++{
++	int sign;
++	unsigned char angle;
++	uint8_t len;
++	uint8_t speed;
++	int8_t velocity_y;
++	uint8_t ip;
++	uint8_t cmd;
++	int8_t sign_polar_1;
++	int8_t sign_polar_2;
++	register screen_y_t top;
++
++	#define param(offset) enemy_script[ip + offset]
++
++	enemy_script = reinterpret_cast<unsigned char near *>(
++		enemy_formation->script
++	);
++	ip = enemy_cur->script_ip;
++	cmd = enemy_script[ip];
++	switch(cmd) {
++	case 0x00:
++		len = 2;
++		break;
++	case 0x01:
++		*enemy_velocity_x = param(2);
++		velocity_y = param(3);
++		*enemy_velocity_y = velocity_y;
++		enemy_move();
++		len = 4;
++		break;
++	case 0x0A:
++		enemy_move();
++		len = 2;
++		break;
++	case 0xAA:
++		angle = randring2_next8();
++		speed = param(1);
++		*enemy_velocity_x = ((speed * CosTable8[angle]) >> 8);
++		*enemy_velocity_y = ((speed * SinTable8[angle]) >> 8);
++		len = 2;
++		goto advance;
++	case 0x08:
++		sign = ((enemy_cur->spawned_left == 0) ? -1 : 1);
++		*enemy_velocity_x = (param(2) * sign);
++		*enemy_velocity_y = param(3);
++		enemy_move();
++		len = 4;
++		break;
++	case 0x09:
++		enemy_move_aimed();
++		len = 3;
++		break;
++	case 0x02:
++		*enemy_top_on_back_page += scroll_speed_this_frame;
++		len = 2;
++		break;
++	case 0x03:
++		sign_polar_1 = ((enemy_script[enemy_cur->script_ip + 2] == 0) ? -1 : 1);
++		enemy_move_polar(3, sign_polar_1);
++		len = 6;
++		break;
++	case 0x07:
++		sign_polar_2 = ((enemy_cur->spawned_left == 1) ? -1 : 1);
++		enemy_move_polar(2, sign_polar_2);
++		len = 5;
++		break;
++	case 0x0B:
++		enemy_move_polar_swing();
++		len = 6;
++		break;
++	case 0x04:
++		*enemy_left_on_back_page = (param(1) * 8);
++		*enemy_top_on_back_page = (param(2) * 8);
++		len = 3;
++		goto advance;
++	case 0x05:
++		*enemy_left_on_back_page = (
++			(randring2_next16() % (param(2) * 8)) + (param(1) * 8)
++		);
++		*enemy_top_on_back_page = (param(3) * 8);
++		enemy_cur->spawned_left = ((*enemy_left_on_back_page < 208) ? 1 : 0);
++		len = 4;
++		goto advance;
++	case 0x06:
++		*enemy_top_on_back_page = (
++			(randring2_next16() % (param(2) * 8)) + (param(1) * 8)
++		);
++		*enemy_left_on_back_page = (param(3) * 8);
++		len = 4;
++		goto advance;
++	case 0x10:
++		enemy_cur->flag = EF_REMOVE;
++		return 2;
++	case 0x11:
++		enemy_cur->kill_frame = 0;
++		snd_se_play(3);
++		enemy_cur->dying = true;
++		return 2;
++	case 0x20:
++		enemy_aimed_pellet_add(0x00);
++		goto advance_1;
++	case 0x21:
++		enemy_aimed_pellet_add(param(1));
++		len = 2;
++		goto advance;
++	case 0x22:
++		enemy_aimed_pellet_add(enemy_cur->loop_i);
++		enemy_cur->loop_i += param(1);
++		len = 2;
++		goto advance;
++	case 0x25:
++		enemy_cur->bullet_group = param(1);
++		enemy_cur->bullet_speed = param(2);
++		len = 3;
++		goto advance;
++	case 0x24:
++		bullets_add_16x16(
++			(enemy_formation->bullet_offset.x + *enemy_left_on_back_page),
++			(enemy_formation->bullet_offset.y + *enemy_top_on_back_page),
++			param(1),
++			static_cast<bullet_group_or_special_motion_t>(
++				enemy_cur->bullet_group
++			),
++			param(2),
++			enemy_cur->bullet_speed
++		);
++		len = 3;
++		goto advance;
++	case 0x26:
++		top = param(1);
++		top -= scroll_line;
++		if(top < 0) {
++			top += RES_Y;
++		}
++		bullets_add_pellet(
++			(enemy_formation->bullet_offset.x + *enemy_left_on_back_page),
++			top,
++			param(2),
++			param(3),
++			param(4)
++		);
++		len = 5;
++		goto advance;
++	case 0x27:
++		top = param(1);
++		top -= scroll_line;
++		if(top < 0) {
++			top += RES_Y;
++		}
++		bullets_add_16x16(
++			(enemy_formation->bullet_offset.x + *enemy_left_on_back_page),
++			top,
++			param(2),
++			static_cast<bullet_group_or_special_motion_t>(param(3)),
++			param(4),
++			param(5)
++		);
++		len = 6;
++		goto advance;
++	case 0xA0:
++		enemy_cur->script_ip = param(1);
++		return 1;
++	case 0xA1:
++		if(enemy_cur->loop_i++ < param(2)) {
++			enemy_cur->script_ip = param(1);
++		} else {
++			enemy_cur->script_ip += 3;
++		}
++		return 1;
++	case 0xA7:
++		if(enemy_cur->loop_j++ < param(2)) {
++			enemy_cur->script_ip = param(1);
++		} else {
++			enemy_cur->loop_j = 0;
++			enemy_cur->script_ip += 3;
++		}
++		return 1;
++	case 0xA2:
++		enemy_cur->loop_i = param(1);
++		len = 2;
++		goto advance;
++	case 0xA3:
++		enemy_cur->anim_mode = 0;
++		goto advance_1;
++	case 0xA4:
++		enemy_cur->anim_mode = 1;
++		goto advance_1;
++	case 0xA5:
++		enemy_cur->cel = param(1);
++		enemy_cur->anim_mode = 0;
++		len = 2;
++		goto advance;
++	case 0xA6:
++		enemy_cur->cel = param(1);
++		enemy_cur->anim_mode = 2;
++		len = 2;
++		goto advance;
++	case 0xA9:
++		enemy_cur->clip_y = true;
++		goto advance_1;
++	case 0xA8:
++		snd_se_play(param(1));
++		len = 2;
++		goto advance;
++	case 0xAB:
++		enemy_cur->hittest_disabled = true;
++		goto advance_1;
++	case 0xAC:
++		enemy_cur->hittest_disabled = false;
++		goto advance_1;
++	case 0xAD:
++		enemy_cur->player_collision_disabled = true;
++		goto advance_1;
++	case 0xAE:
++		enemy_cur->player_collision_disabled = false;
++		goto advance_1;
++	case 0xAF:
++		tile_ring_set_and_put_both_8(*enemy_left_on_back_page, param(1), param(2));
++		len = 3;
++		goto advance;
++	}
++
++	// Waiting command
++	enemy_cur->kill_frame++;
++	if(param(1) <= enemy_cur->kill_frame) {
++		enemy_cur->script_ip += len;
++		enemy_cur->kill_frame = 0;
++	}
++	return 0;
++
++advance:
++	enemy_cur->script_ip += len;
++	return 1;
++
++advance_1:
++	enemy_cur->script_ip++;
++	return 1;
++
++	#undef param
++}
+ 
+ int near enemy_hittest(void)
+ {
+diff --git a/th02/main/enemy/enemy.hpp b/th02/main/enemy/enemy.hpp
+index f4bbbc7c..de3d4d4f 100644
+--- a/th02/main/enemy/enemy.hpp
++++ b/th02/main/enemy/enemy.hpp
+@@ -36,8 +36,8 @@ enum enemy_flag_t {
+ 
+ struct enemy_t {
+ 	screen_point_t pos[PAGE_COUNT];
+-	int16_t unknown_08;
+-	int16_t kill_frame;
++	int16_t script_ip;
++	int16_t kill_frame; // Also the frame counter of waiting script commands
+ 	int16_t formation;
+ 	uint8_t flag;
+ 	uint8_t age;
+@@ -45,7 +45,9 @@ struct enemy_t {
+ 	int8_t unknown_11;
+ 	int16_t cel;
+ 	int16_t anim_mode; // 1 = cycles [cel], 2 = [cel] is the patnum
+-	int8_t unknown_16[6];
++	int16_t loop_i; // Also used as an angle
++	int16_t spawned_left; // Spawned on the left half of the playfield?
++	int16_t loop_j;
+ 	int8_t velocity_x;
+ 	int8_t velocity_y;
+ 	bool clip_y;
+diff --git a/th02_main.asm b/th02_main.asm
+index 8bc40ddb..64e61c7a 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -6996,1355 +6996,9 @@ public @sigma_end$qv
+ 		pop	bp
+ 		retf
+ @sigma_end$qv	endp
+-
+-; ---------------------------------------------------------------------------
+-
+-loc_16A66:
+-		push	bp
+-		mov	bp, sp
+-		pop	bp
+-		retf
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @sub_16A6B$qv
+-@sub_16A6B$qv	proc far
+-		push	bp
+-		mov	bp, sp
+-		xor	ax, ax
+-		jmp	short loc_16A7D
+-; ---------------------------------------------------------------------------
+-
+-loc_16A72:
+-		mov	bx, ax
+-		imul	bx, 26h
+-		mov	byte ptr [bx+7B5Eh], 0
+-		inc	ax
+-
+-loc_16A7D:
+-		cmp	ax, 19h
+-		jl	short loc_16A72
+-		mov	word_1EE50, 0
+-		pop	bp
+-		retf
+-@sub_16A6B$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @sub_16A8A$qv
+-@sub_16A8A$qv	proc far
+-		push	bp
+-		mov	bp, sp
+-		setfarfp	_farfp_26C3C, loc_16A66
+-		setfarfp	_farfp_26C40, loc_16A66
+-		pop	bp
+-		retf
+-@sub_16A8A$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @ENEMY_AIMED_PELLET_ADD$QUC
+-@ENEMY_AIMED_PELLET_ADD$QUC	proc near
+-
+-@@angle		= word ptr  4
+-
+-		push	bp
+-		mov	bp, sp
+-		mov	bx, _enemy_formation
+-		mov	ax, [bx+4]
+-		mov	bx, _enemy_left_on_back_page
+-		add	ax, [bx]
+-		push	ax	; left
+-		mov	bx, _enemy_formation
+-		mov	ax, [bx+6]
+-		mov	bx, _enemy_top_on_back_page
+-		add	ax, [bx]
+-		push	ax	; top
+-		push	[bp+@@angle]	; angle
+-		mov	bx, _enemy_cur
+-		push	word ptr [bx+24h]	; group
+-		mov	al, [bx+25h]
+-		mov	ah, 0
+-		push	ax	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-		pop	bp
+-		retn	2
+-@ENEMY_AIMED_PELLET_ADD$QUC	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sub_16ADD	proc near
+-		push	bp
+-		mov	bp, sp
+-		mov	bx, _enemy_velocity_x
+-		mov	al, [bx]
+-		cbw
+-		mov	bx, _enemy_left_on_back_page
+-		add	[bx], ax
+-		mov	bx, _enemy_velocity_y
+-		mov	al, [bx]
+-		cbw
+-		mov	bx, _enemy_top_on_back_page
+-		add	[bx], ax
+-		pop	bp
+-		retn
+-sub_16ADD	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sub_16AFC	proc near
+-
+-@@vector_y		= word ptr -6
+-@@vector_x		= word ptr -4
+-@@y2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 6
+-		mov	ax, _player_topleft.y
+-		add	ax, 16
+-		mov	[bp+@@y2], ax
+-		mov	bx, _enemy_left_on_back_page
+-		push	word ptr [bx]
+-		mov	bx, _enemy_top_on_back_page
+-		push	word ptr [bx]
+-		mov	ax, _player_topleft.x
+-		add	ax, 24
+-		push	ax
+-		push	[bp+@@y2]
+-		push	0
+-		push	ss
+-		lea	ax, [bp+@@vector_x]
+-		push	ax
+-		push	ss
+-		lea	ax, [bp+@@vector_y]
+-		push	ax
+-		mov	bx, _enemy_cur
+-		mov	bx, [bx+8]
+-		add	bx, word_26C44
+-		mov	al, [bx+2]
+-		mov	ah, 0
+-		push	ax
+-		call	@vector2_between_plus$qiiiiucmit6i
+-		mov	bx, _enemy_velocity_x
+-		mov	al, byte ptr [bp+@@vector_x]
+-		mov	[bx], al
+-		mov	bx, _enemy_velocity_y
+-		mov	al, byte ptr [bp+@@vector_y]
+-		mov	[bx], al
+-		mov	bx, _enemy_left_on_back_page
+-		mov	ax, [bp+@@vector_x]
+-		add	[bx], ax
+-		mov	bx, _enemy_top_on_back_page
+-		mov	ax, [bp+var_6]
+-		add	[bx], ax
+-		leave
+-		retn
+-sub_16AFC	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sub_16B69	proc near
+-
+-@@angle		= byte ptr -5
+-@@vector_y		= word ptr -4
+-@@vector_x		= word ptr -2
+-arg_0		= word ptr  4
+-arg_2		= word ptr  6
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 6
+-		push	si
+-		mov	bx, _enemy_cur
+-		mov	ax, [bx+8]
+-		add	ax, [bp+arg_2]
+-		mov	si, ax
+-		mov	bx, word_26C44
+-		mov	al, [bx+si+1]
+-		mov	ah, 0
+-		mov	bx, _enemy_cur
+-		push	ax
+-		mov	ax, [bx+0Ah]
+-		cwd
+-		pop	bx
+-		idiv	bx
+-		or	dx, dx
+-		jnz	short loc_16B9F
+-		mov	bx, _enemy_cur
+-		mov	ax, [bp+arg_0]
+-		add	[bx+16h], ax
+-
+-loc_16B9F:
+-		mov	bx, word_26C44
+-		mov	al, [bx+si]
+-		mov	bx, _enemy_cur
+-		add	al, [bx+16h]
+-		mov	[bp+@@angle], al
+-		push	ss
+-		lea	ax, [bp+@@vector_x]
+-		push	ax
+-		push	ss
+-		lea	ax, [bp+@@vector_y]
+-		push	ax
+-		push	word ptr [bp+@@angle]
+-		mov	bx, word_26C44
+-		mov	al, [bx+si+2]
+-		mov	ah, 0
+-		push	ax
+-		call	@vector2$qmit1uci
+-		mov	bx, _enemy_left_on_back_page
+-		mov	ax, [bp+@@vector_x]
+-		add	[bx], ax
+-		mov	bx, _enemy_top_on_back_page
+-		mov	ax, [bp+@@vector_y]
+-		add	[bx], ax
+-		mov	bx, _enemy_velocity_x
+-		mov	al, byte ptr [bp+@@vector_x]
+-		mov	[bx], al
+-		mov	bx, _enemy_velocity_y
+-		mov	al, byte ptr [bp+@@vector_y]
+-		mov	[bx], al
+-		pop	si
+-		leave
+-		retn	4
+-sub_16B69	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sub_16BF4	proc near
+-
+-@@angle		= byte ptr -0Fh
+-var_E		= word ptr -0Eh
+-@@vector_y		= word ptr -0Ch
+-@@vector_x		= word ptr -0Ah
+-var_8		= dword	ptr -8
+-var_4		= dword	ptr -4
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 10h
+-		push	si
+-		mov	ax, _enemy_left_on_back_page
+-		mov	word ptr [bp+var_4+2], ds
+-		mov	word ptr [bp+var_4], ax
+-		mov	ax, _enemy_top_on_back_page
+-		mov	word ptr [bp+var_8+2], ds
+-		mov	word ptr [bp+var_8], ax
+-		mov	bx, _enemy_cur
+-		mov	ax, [bx+8]
+-		add	ax, 2
+-		mov	si, ax
+-		mov	bx, si
+-		inc	si
+-		add	bx, word_26C44
+-		cmp	byte ptr [bx], 0
+-		jnz	short loc_16C2A
+-		mov	ax, -1
+-		jmp	short loc_16C2D
+-; ---------------------------------------------------------------------------
+-
+-loc_16C2A:
+-		mov	ax, 1
+-
+-loc_16C2D:
+-		mov	[bp+var_E], ax
+-		mov	bx, word_26C44
+-		mov	al, [bx+si]
+-		mov	bx, _enemy_cur
+-		add	al, [bx+16h]
+-		mov	[bp+@@angle], al
+-		inc	si
+-		mov	bx, word_26C44
+-		mov	al, [bx+si]
+-		mov	ah, 0
+-		imul	[bp+var_E]
+-		mov	bx, _enemy_cur
+-		add	[bx+16h], ax
+-		inc	si
+-		push	ss
+-		lea	ax, [bp+@@vector_x]
+-		push	ax
+-		push	ss
+-		lea	ax, [bp+@@vector_y]
+-		push	ax
+-		push	word ptr [bp+@@angle]
+-		mov	bx, word_26C44
+-		mov	al, [bx+si]
+-		mov	ah, 0
+-		push	ax
+-		call	@vector2$qmit1uci
+-		les	bx, [bp+var_4]
+-		mov	ax, [bp+@@vector_x]
+-		add	es:[bx], ax
+-		les	bx, [bp+var_8]
+-		mov	ax, [bp+@@vector_y]
+-		add	es:[bx], ax
+-		mov	bx, _enemy_velocity_x
+-		mov	al, byte ptr [bp+@@vector_x]
+-		mov	[bx], al
+-		mov	bx, _enemy_velocity_y
+-		mov	al, byte ptr [bp+@@vector_y]
+-		mov	[bx], al
+-		pop	si
+-		leave
+-		retn
+-sub_16BF4	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sub_16C96	proc near
+-
+-arg_0		= word ptr  4
+-arg_2		= word ptr  6
+-arg_4		= word ptr  8
+-arg_6		= word ptr  0Ah
+-
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		mov	si, [bp+arg_6]
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	byte ptr [bx+7B5Eh], 1
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		add	bx, ax
+-		mov	[bx+7B50h], si
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		add	bx, ax
+-		mov	ax, [bp+arg_4]
+-		mov	[bx+7B52h], ax
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	word ptr [bx+7B62h], 0
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	word ptr [bx+7B58h], 0
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	ax, [bp+arg_0]
+-		mov	[bx+7B5Ch], ax
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	word ptr [bx+7B5Ah], 0
+-		call	@randring2_next8$qv
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	[bx+7B5Fh], al
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	word ptr [bx+7B66h], 0
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	byte ptr [bx+7B72h], 0
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	byte ptr [bx+7B73h], 0
+-		cmp	si, 0D0h
+-		jge	short loc_16D3E
+-		mov	ax, 1
+-		jmp	short loc_16D40
+-; ---------------------------------------------------------------------------
+-
+-loc_16D3E:
+-		xor	ax, ax
+-
+-loc_16D40:
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	[bx+7B68h], ax
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	word ptr [bx+7B6Ah], 0
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	byte ptr [bx+7B6Eh], 0
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	word ptr [bx+7B64h], 1
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	byte ptr [bx+7B60h], 0
+-		mov	bx, [bp+arg_2]
+-		imul	bx, 26h
+-		mov	word ptr [bx+7B70h], 0
+-		mov	al, _enemy_count
+-		mov	ah, 0
+-		cmp	ax, [bp+arg_2]
+-		jge	short loc_16D96
+-		mov	al, byte ptr [bp+arg_2]
+-		inc	al
+-		mov	_enemy_count, al
+-
+-loc_16D96:
+-		pop	si
+-		pop	bp
+-		retn	8
+-sub_16C96	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @sub_16D9B$qv
+-@sub_16D9B$qv	proc far
+-
+-var_4		= word ptr -4
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		push	si
+-		push	di
+-		mov	ax, word_1EE50
+-		cmp	ax, _stage_line_count
+-		jge	loc_16E39
+-		add	ax, ax
+-		les	bx, _stage_lines
+-		add	bx, ax
+-		mov	ax, es:[bx]
+-		cmp	ax, _tile_rows_scrolled
+-		jnz	short loc_16E39
+-		mov	di, 1
+-		jmp	short loc_16E30
+-; ---------------------------------------------------------------------------
+-
+-loc_16DC4:
+-		mov	bx, di
+-		shl	bx, 2
+-		les	bx, _stage_lines[bx]
+-		mov	ax, word_1EE50
+-		add	ax, ax
+-		add	bx, ax
+-		cmp	word ptr es:[bx], 0FFFFh
+-		jz	short loc_16E2F
+-		mov	bx, di
+-		shl	bx, 2
+-		mov	bx, word ptr _stage_lines[bx]
+-		mov	ax, word_1EE50
+-		add	ax, ax
+-		add	bx, ax
+-		mov	ax, es:[bx]
+-		mov	[bp+var_2], ax
+-		mov	bx, [bp+var_2]
+-		imul	bx, 24h
+-		mov	ax, [bx+7F08h]
+-		mov	[bp+var_4], ax
+-		cmp	_midboss_active, 0
+-		jnz	short loc_16E2F
+-		xor	si, si
+-		jmp	short loc_16E2A
+-; ---------------------------------------------------------------------------
+-
+-loc_16E08:
+-		mov	bx, si
+-		imul	bx, 26h
+-		cmp	byte ptr [bx+7B5Eh], 0
+-		jnz	short loc_16E29
+-		mov	ax, di
+-		shl	ax, 3
+-		add	ax, 10h
+-		push	ax
+-		push	[bp+var_4]
+-		push	si
+-		push	[bp+var_2]
+-		call	sub_16C96
+-		jmp	short loc_16E2F
+-; ---------------------------------------------------------------------------
+-
+-loc_16E29:
+-		inc	si
+-
+-loc_16E2A:
+-		cmp	si, 19h
+-		jl	short loc_16E08
+-
+-loc_16E2F:
+-		inc	di
+-
+-loc_16E30:
+-		cmp	di, 31h	; '1'
+-		jl	short loc_16DC4
+-		inc	word_1EE50
+-
+-loc_16E39:
+-		pop	di
+-		pop	si
+-		leave
+-		retf
+-@sub_16D9B$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @enemy_script_run$qv
+-@enemy_script_run$qv	proc near
+-
+-var_A		= byte ptr -0Ah
+-var_9		= byte ptr -9
+-var_8		= byte ptr -8
+-var_7		= byte ptr -7
+-var_6		= byte ptr -6
+-var_5		= byte ptr -5
+-var_4		= byte ptr -4
+-@@angle		= byte ptr -3
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 0Ah
+-		push	si
+-		mov	bx, _enemy_formation
+-		mov	ax, [bx+20h]
+-		mov	word_26C44, ax
+-		mov	bx, _enemy_cur
+-		mov	al, [bx+8]
+-		mov	[bp+var_7], al
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx]
+-		mov	[bp+var_8], al
+-		mov	ah, 0
+-		cmp	ax, 25h	; '%'
+-		jz	loc_1719F
+-		jg	short loc_16E80
+-		mov	bx, ax
+-		cmp	bx, 24h	; '$'
+-		ja	loc_174B0
+-		add	bx, bx
+-		jmp	cs:off_17518[bx]
+-; ---------------------------------------------------------------------------
+-
+-loc_16E80:
+-		cmp	ax, 0A7h
+-		jz	loc_17361
+-		jg	short loc_16EC9
+-		cmp	ax, 0A2h
+-		jz	loc_173AB
+-		jg	short loc_16EB6
+-		cmp	ax, 0A0h
+-		jz	loc_172FF
+-		jg	short loc_16EAC
+-		cmp	ax, 26h	; '&'
+-		jz	loc_17226
+-		cmp	ax, 27h	; '''
+-		jz	loc_1728A
+-		jmp	loc_174B0
+-; ---------------------------------------------------------------------------
+-
+-loc_16EAC:
+-		cmp	ax, 0A1h
+-		jz	loc_1731C
+-		jmp	loc_174B0
+-; ---------------------------------------------------------------------------
+-
+-loc_16EB6:
+-		sub	ax, 0A3h ; '£'
+-		mov	bx, ax
+-		cmp	bx, 3
+-		ja	loc_174B0
+-		add	bx, bx
+-		jmp	cs:off_17510[bx]
+-; ---------------------------------------------------------------------------
+-
+-loc_16EC9:
+-		sub	ax, 0A8h ; '¨'
+-		mov	bx, ax
+-		cmp	bx, 7
+-		ja	loc_174B0
+-		add	bx, bx
+-		jmp	cs:off_17500[bx]
+-
+-loc_16EDC:
+-		mov	[bp+var_4], 2
+-		jmp	loc_174B0
+-; ---------------------------------------------------------------------------
+-
+-loc_16EE3:
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+2]
+-		mov	bx, _enemy_velocity_x
+-		mov	[bx], al
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+3]
+-		mov	[bp+var_6], al
+-		mov	bx, _enemy_velocity_y
+-		jmp	loc_16FAA
+-; ---------------------------------------------------------------------------
+-
+-loc_16F0F:
+-		call	sub_16ADD
+-		mov	[bp+var_4], 2
+-		jmp	loc_174B0
+-; ---------------------------------------------------------------------------
+-
+-loc_16F19:
+-		call	@randring2_next8$qv
+-		mov	[bp+@@angle], al
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	[bp+var_5], al
+-		mov	ah, 0
+-		mov	dl, [bp+@@angle]
+-		mov	dh, 0
+-		add	dx, dx
+-		mov	bx, dx
+-		imul	_CosTable8[bx]
+-		sar	ax, 8
+-		mov	bx, _enemy_velocity_x
+-		mov	[bx], al
+-		mov	al, [bp+var_5]
+-		mov	ah, 0
+-		mov	dl, [bp+@@angle]
+-		mov	dh, 0
+-		add	dx, dx
+-		mov	bx, dx
+-		imul	_SinTable8[bx]
+-		sar	ax, 8
+-		mov	bx, _enemy_velocity_y
+-		mov	[bx], al
+-		mov	[bp+var_4], 2
+-		jmp	loc_174E1
+-; ---------------------------------------------------------------------------
+-
+-loc_16F6A:
+-		mov	bx, _enemy_cur
+-		cmp	word ptr [bx+18h], 0
+-		jnz	short loc_16F79
+-		mov	ax, 0FFFFh
+-		jmp	short loc_16F7C
+-; ---------------------------------------------------------------------------
+-
+-loc_16F79:
+-		mov	ax, 1
+-
+-loc_16F7C:
+-		mov	[bp+var_2], ax
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+2]
+-		mov	ah, 0
+-		imul	[bp+var_2]
+-		mov	bx, _enemy_velocity_x
+-		mov	[bx], al
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+3]
+-		mov	bx, _enemy_velocity_y
+-
+-loc_16FAA:
+-		mov	[bx], al
+-		call	sub_16ADD
+-		mov	[bp+var_4], 4
+-		jmp	loc_174B0
+-; ---------------------------------------------------------------------------
+-
+-loc_16FB6:
+-		call	sub_16AFC
+-		mov	[bp+var_4], 3
+-		jmp	loc_174B0
+-; ---------------------------------------------------------------------------
+-
+-loc_16FC0:
+-		mov	al, _scroll_speed_this_frame
+-		mov	ah, 0
+-		mov	bx, _enemy_top_on_back_page
+-		add	[bx], ax
+-		mov	[bp+var_4], 2
+-		jmp	loc_174B0
+-; ---------------------------------------------------------------------------
+-
+-loc_16FD2:
+-		mov	bx, _enemy_cur
+-		mov	bx, [bx+8]
+-		add	bx, word_26C44
+-		cmp	byte ptr [bx+2], 0
+-		jnz	short loc_16FE7
+-		mov	al, -1
+-		jmp	short loc_16FE9
+-; ---------------------------------------------------------------------------
+-
+-loc_16FE7:
+-		mov	al, 1
+-
+-loc_16FE9:
+-		mov	[bp+var_9], al
+-		push	3
+-		cbw
+-		push	ax
+-		call	sub_16B69
+-		mov	[bp+var_4], 6
+-		jmp	loc_174B0
+-; ---------------------------------------------------------------------------
+-
+-loc_16FFA:
+-		mov	bx, _enemy_cur
+-		cmp	word ptr [bx+18h], 1
+-		jnz	short loc_17008
+-		mov	al, -1
+-		jmp	short loc_1700A
+-; ---------------------------------------------------------------------------
+-
+-loc_17008:
+-		mov	al, 1
+-
+-loc_1700A:
+-		mov	[bp+var_A], al
+-		push	2
+-		cbw
+-		push	ax
+-		call	sub_16B69
+-		mov	[bp+var_4], 5
+-		jmp	loc_174B0
+-; ---------------------------------------------------------------------------
+-
+-loc_1701B:
+-		call	sub_16BF4
+-		mov	[bp+var_4], 6
+-		jmp	loc_174B0
+-; ---------------------------------------------------------------------------
+-
+-loc_17025:
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	ah, 0
+-		shl	ax, 3
+-		mov	bx, _enemy_left_on_back_page
+-		mov	[bx], ax
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+2]
+-		mov	ah, 0
+-		shl	ax, 3
+-		mov	bx, _enemy_top_on_back_page
+-		mov	[bx], ax
+-		mov	[bp+var_4], 3
+-		jmp	loc_174E1
+-; ---------------------------------------------------------------------------
+-
+-loc_1705E:
+-		call	@randring2_next16$qv
+-		mov	dl, [bp+var_7]
+-		mov	dh, 0
+-		add	dx, word_26C44
+-		mov	bx, dx
+-		mov	dl, [bx+2]
+-		mov	dh, 0
+-		shl	dx, 3
+-		push	ax
+-		push	dx
+-		xor	dx, dx
+-		pop	bx
+-		pop	ax
+-		div	bx
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	ah, 0
+-		shl	ax, 3
+-		add	dx, ax
+-		mov	bx, _enemy_left_on_back_page
+-		mov	[bx], dx
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+3]
+-		mov	ah, 0
+-		shl	ax, 3
+-		mov	bx, _enemy_top_on_back_page
+-		mov	[bx], ax
+-		mov	bx, _enemy_left_on_back_page
+-		cmp	word ptr [bx], 0D0h
+-		jge	short loc_170BF
+-		mov	ax, 1
+-		jmp	short loc_170C1
+-; ---------------------------------------------------------------------------
+-
+-loc_170BF:
+-		xor	ax, ax
+-
+-loc_170C1:
+-		mov	bx, _enemy_cur
+-		mov	[bx+18h], ax
+-		mov	[bp+var_4], 4
+-		jmp	loc_174E1
+-; ---------------------------------------------------------------------------
+-
+-loc_170CF:
+-		call	@randring2_next16$qv
+-		mov	dl, [bp+var_7]
+-		mov	dh, 0
+-		add	dx, word_26C44
+-		mov	bx, dx
+-		mov	dl, [bx+2]
+-		mov	dh, 0
+-		shl	dx, 3
+-		push	ax
+-		push	dx
+-		xor	dx, dx
+-		pop	bx
+-		pop	ax
+-		div	bx
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	ah, 0
+-		shl	ax, 3
+-		add	dx, ax
+-		mov	bx, _enemy_top_on_back_page
+-		mov	[bx], dx
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+3]
+-		mov	ah, 0
+-		shl	ax, 3
+-		mov	bx, _enemy_left_on_back_page
+-		mov	[bx], ax
+-		mov	[bp+var_4], 4
+-		jmp	loc_174E1
+-; ---------------------------------------------------------------------------
+-
+-loc_17128:
+-		mov	bx, _enemy_cur
+-		mov	byte ptr [bx+0Eh], 2
+-		mov	ax, 2
+-		jmp	loc_174FC
+-; ---------------------------------------------------------------------------
+-
+-loc_17136:
+-		mov	bx, _enemy_cur
+-		mov	word ptr [bx+0Ah], 0
+-		call	_snd_se_play c, 3
+-		mov	bx, _enemy_cur
+-		mov	byte ptr [bx+10h], 1
+-		mov	ax, 2
+-		jmp	loc_174FC
+-; ---------------------------------------------------------------------------
+-
+-loc_17157:
+-		call	@ENEMY_AIMED_PELLET_ADD$QUC pascal, 00h
+-		jmp	loc_174F2
+-; ---------------------------------------------------------------------------
+-
+-loc_1715F:
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		call	@ENEMY_AIMED_PELLET_ADD$QUC pascal, word ptr [bx+1]
+-		mov	[bp+var_4], 2
+-		jmp	loc_174E1
+-; ---------------------------------------------------------------------------
+-
+-loc_17177:
+-		mov	bx, _enemy_cur
+-		call	@ENEMY_AIMED_PELLET_ADD$QUC pascal, word ptr [bx+16h]
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	ah, 0
+-		mov	bx, _enemy_cur
+-		add	[bx+16h], ax
+-		mov	[bp+var_4], 2
+-		jmp	loc_174E1
+-; ---------------------------------------------------------------------------
+-
+-loc_1719F:
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	bx, _enemy_cur
+-		mov	[bx+24h], al
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+2]
+-		mov	bx, _enemy_cur
+-		mov	[bx+25h], al
+-		mov	[bp+var_4], 3
+-		jmp	loc_174E1
+-; ---------------------------------------------------------------------------
+-
+-loc_171D0:
+-		mov	bx, _enemy_formation
+-		mov	ax, [bx+4]
+-		mov	bx, _enemy_left_on_back_page
+-		add	ax, [bx]
+-		push	ax	; left
+-		mov	bx, _enemy_formation
+-		mov	ax, [bx+6]
+-		mov	bx, _enemy_top_on_back_page
+-		add	ax, [bx]
+-		push	ax	; top
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		push	word ptr [bx+1]	; angle
+-		mov	bx, _enemy_cur
+-		push	word ptr [bx+24h]	; group
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+2]
+-		mov	ah, 0
+-		push	ax	; patnum
+-		mov	bx, _enemy_cur
+-		mov	al, [bx+25h]
+-		mov	ah, 0
+-		push	ax	; speed
+-		call	@bullets_add_16x16$qiiuc32bullet_group_or_special_motion_tii
+-		mov	[bp+var_4], 3
+-		jmp	loc_174E1
+-; ---------------------------------------------------------------------------
+-
+-loc_17226:
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	ah, 0
+-		mov	si, ax
+-		sub	si, _scroll_line
+-		or	si, si
+-		jge	short loc_17244
+-		add	si, RES_Y
+-
+-loc_17244:
+-		mov	bx, _enemy_formation
+-		mov	ax, [bx+4]
+-		mov	bx, _enemy_left_on_back_page
+-		add	ax, [bx]
+-		push	ax	; left
+-		push	si	; top
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		push	word ptr [bx+2]	; angle
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		push	word ptr [bx+3]	; group
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+4]
+-		mov	ah, 0
+-		push	ax	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-		mov	[bp+var_4], 5
+-		jmp	loc_174E1
+-; ---------------------------------------------------------------------------
+-
+-loc_1728A:
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	ah, 0
+-		mov	si, ax
+-		sub	si, _scroll_line
+-		or	si, si
+-		jge	short loc_172A8
+-		add	si, RES_Y
+-
+-loc_172A8:
+-		mov	bx, _enemy_formation
+-		mov	ax, [bx+4]
+-		mov	bx, _enemy_left_on_back_page
+-		add	ax, [bx]
+-		push	ax	; left
+-		push	si	; top
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		push	word ptr [bx+2]	; angle
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		push	word ptr [bx+3]	; group
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+4]
+-		mov	ah, 0
+-		push	ax	; patnum
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+5]
+-		mov	ah, 0
+-		push	ax	; speed
+-		call	@bullets_add_16x16$qiiuc32bullet_group_or_special_motion_tii
+-		mov	[bp+var_4], 6
+-		jmp	loc_174E1
+-; ---------------------------------------------------------------------------
+-
+-loc_172FF:
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	ah, 0
+-		mov	bx, _enemy_cur
+-		mov	[bx+8],	ax
+-		mov	ax, 1
+-		jmp	loc_174FC
+-; ---------------------------------------------------------------------------
+-
+-loc_1731C:
+-		mov	bx, _enemy_cur
+-		mov	ax, [bx+16h]
+-		inc	word ptr [bx+16h]
+-		mov	dl, [bp+var_7]
+-		mov	dh, 0
+-		add	dx, word_26C44
+-		mov	bx, dx
+-		mov	dl, [bx+2]
+-		mov	dh, 0
+-		cmp	ax, dx
+-		jge	short loc_17353
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	ah, 0
+-		mov	bx, _enemy_cur
+-		mov	[bx+8],	ax
+-		jmp	short loc_1735B
+-; ---------------------------------------------------------------------------
+-
+-loc_17353:
+-		mov	bx, _enemy_cur
+-		add	word ptr [bx+8], 3
+-
+-loc_1735B:
+-		mov	ax, 1
+-		jmp	loc_174FC
+-; ---------------------------------------------------------------------------
+-
+-loc_17361:
+-		mov	bx, _enemy_cur
+-		mov	ax, [bx+1Ah]
+-		inc	word ptr [bx+1Ah]
+-		mov	dl, [bp+var_7]
+-		mov	dh, 0
+-		add	dx, word_26C44
+-		mov	bx, dx
+-		mov	dl, [bx+2]
+-		mov	dh, 0
+-		cmp	ax, dx
+-		jge	short loc_17398
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	ah, 0
+-		mov	bx, _enemy_cur
+-		mov	[bx+8],	ax
+-		jmp	short loc_173A5
+-; ---------------------------------------------------------------------------
+-
+-loc_17398:
+-		mov	bx, _enemy_cur
+-		mov	word ptr [bx+1Ah], 0
+-		add	word ptr [bx+8], 3
+-
+-loc_173A5:
+-		mov	ax, 1
+-		jmp	loc_174FC
+-; ---------------------------------------------------------------------------
+-
+-loc_173AB:
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	ah, 0
+-		mov	bx, _enemy_cur
+-		mov	[bx+16h], ax
+-		mov	[bp+var_4], 2
+-		jmp	loc_174E1
+-; ---------------------------------------------------------------------------
+-
+-loc_173C9:
+-		mov	bx, _enemy_cur
+-		mov	word ptr [bx+14h], 0
+-		jmp	loc_174F2
+-; ---------------------------------------------------------------------------
+-
+-loc_173D5:
+-		mov	bx, _enemy_cur
+-		mov	word ptr [bx+14h], 1
+-		jmp	loc_174F2
+-; ---------------------------------------------------------------------------
+-
+-loc_173E1:
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	ah, 0
+-		mov	bx, _enemy_cur
+-		mov	[bx+12h], ax
+-		mov	word ptr [bx+14h], 0
+-		mov	[bp+var_4], 2
+-		jmp	loc_174E1
+-; ---------------------------------------------------------------------------
+-
+-loc_17404:
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	ah, 0
+-		mov	bx, _enemy_cur
+-		mov	[bx+12h], ax
+-		mov	word ptr [bx+14h], 2
+-		mov	[bp+var_4], 2
+-		jmp	loc_174E1
+-; ---------------------------------------------------------------------------
+-
+-loc_17427:
+-		mov	bx, _enemy_cur
+-		mov	byte ptr [bx+1Eh], 1
+-		jmp	loc_174F2
+-; ---------------------------------------------------------------------------
+-
+-loc_17432:
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	ah, 0
+-		call	_snd_se_play c, ax
+-		mov	[bp+var_4], 2
+-		jmp	loc_174E1
+-; ---------------------------------------------------------------------------
+-
+-loc_17452:
+-		mov	bx, _enemy_cur
+-		mov	byte ptr [bx+22h], 1
+-		jmp	loc_174F2
+-; ---------------------------------------------------------------------------
+-
+-loc_1745D:
+-		mov	bx, _enemy_cur
+-		mov	byte ptr [bx+22h], 0
+-		jmp	loc_174F2
+-; ---------------------------------------------------------------------------
+-
+-loc_17468:
+-		mov	bx, _enemy_cur
+-		mov	byte ptr [bx+23h], 1
+-		jmp	loc_174F2
+-; ---------------------------------------------------------------------------
+-
+-loc_17473:
+-		mov	bx, _enemy_cur
+-		mov	byte ptr [bx+23h], 0
+-		jmp	short loc_174F2
+-; ---------------------------------------------------------------------------
+-
+-loc_1747D:
+-		mov	bx, _enemy_left_on_back_page
+-		push	word ptr [bx]	; left
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	ah, 0
+-		push	ax	; y
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+2]
+-		mov	ah, 0
+-		push	ax	; image
+-		call	@tile_ring_set_and_put_both_8$qiii
+-		mov	[bp+var_4], 3
+-		jmp	short loc_174E1
+-; ---------------------------------------------------------------------------
+-
+-loc_174B0:
+-		mov	bx, _enemy_cur
+-		inc	word ptr [bx+0Ah]
+-		mov	al, [bp+var_7]
+-		mov	ah, 0
+-		add	ax, word_26C44
+-		mov	bx, ax
+-		mov	al, [bx+1]
+-		mov	ah, 0
+-		mov	bx, _enemy_cur
+-		cmp	ax, [bx+0Ah]
+-		jg	short loc_174DD
+-		mov	al, [bp+var_4]
+-		mov	ah, 0
+-		add	[bx+8],	ax
+-		mov	word ptr [bx+0Ah], 0
+-
+-loc_174DD:
+-		xor	ax, ax
+-		jmp	short loc_174FC
+-; ---------------------------------------------------------------------------
+-
+-loc_174E1:
+-		mov	al, [bp+var_4]
+-		mov	ah, 0
+-		mov	bx, _enemy_cur
+-		add	[bx+8],	ax
+-		mov	ax, 1
+-		jmp	short loc_174FC
+-; ---------------------------------------------------------------------------
+-
+-loc_174F2:
+-		mov	bx, _enemy_cur
+-		inc	word ptr [bx+8]
+-		mov	ax, 1
+-
+-loc_174FC:
+-		pop	si
+-		leave
+-		retn
+-@enemy_script_run$qv	endp
+-
+-; ---------------------------------------------------------------------------
+-		db 0
+-off_17500	dw offset loc_17432
+-		dw offset loc_17427
+-		dw offset loc_16F19
+-		dw offset loc_17452
+-		dw offset loc_1745D
+-		dw offset loc_17468
+-		dw offset loc_17473
+-		dw offset loc_1747D
+-off_17510	dw offset loc_173C9
+-		dw offset loc_173D5
+-		dw offset loc_173E1
+-		dw offset loc_17404
+-off_17518	dw offset loc_16EDC
+-		dw offset loc_16EE3
+-		dw offset loc_16FC0
+-		dw offset loc_16FD2
+-		dw offset loc_17025
+-		dw offset loc_1705E
+-		dw offset loc_170CF
+-		dw offset loc_16FFA
+-		dw offset loc_16F6A
+-		dw offset loc_16FB6
+-		dw offset loc_16F0F
+-		dw offset loc_1701B
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_17128
+-		dw offset loc_17136
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_174B0
+-		dw offset loc_17157
+-		dw offset loc_1715F
+-		dw offset loc_17177
+-		dw offset loc_174B0
+-		dw offset loc_171D0
+-
++	extern @sub_16A6B$qv:proc
++	extern @sub_16A8A$qv:proc
++	extern @sub_16D9B$qv:proc
+ 	extern @sub_1766E$qv:proc
+ 	extern @sub_17979$qv:proc
+ 	extern @sub_17A55$qv:proc
+@@ -10770,7 +9424,8 @@ aStage5b2_bft	db 'stage5b2.bft',0
+ aBoss5_m	db 'boss5.m',0
+ ; char aMaine[]
+ aMaine		db 'maine',0
+-word_1EE50	dw 0
++public _stage_line_cur
++_stage_line_cur	dw 0
+ public _enemy_count
+ _enemy_count	db 0
+ 		db 0
+@@ -11443,7 +10098,8 @@ public _farfp_26C3C
+ _farfp_26C3C	dd ?
+ public _farfp_26C40
+ _farfp_26C40	dd ?
+-word_26C44	dw ?
++public _enemy_script
++_enemy_script	dw ?
+ public _enemy_cur
+ _enemy_cur	dw ?
+ public _enemy_formation
