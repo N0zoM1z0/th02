@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:16:49 +0100
+Subject: [PATCH] Define the cfg TU's data in C++ (rank, stage_id and its file
+ name)
+
+---
+ th02/main_cfg.cpp | 5 +++--
+ th02_main.asm     | 5 -----
+ 2 files changed, 3 insertions(+), 7 deletions(-)
+
+diff --git a/th02/main_cfg.cpp b/th02/main_cfg.cpp
+index 94e15fe2..6a8070f2 100644
+--- a/th02/main_cfg.cpp
++++ b/th02/main_cfg.cpp
+@@ -32,13 +32,14 @@
+ #include "th02/main/stage/stage.hpp"
+ #include "th02/main/tile/tile.hpp"
+ 
+-extern const char aHuuma_cfg[];
++char rank = RANK_NORMAL;
++char stage_id = 0;
+ 
+ int near cfg_load(void)
+ {
+ 	resident_t __seg *resident_seg;
+ 
+-	file_ropen(aHuuma_cfg);
++	file_ropen("huuma.cfg");
+ 	file_seek(5, 0);
+ 	file_read(&resident_seg, sizeof(resident_seg));
+ 	file_close();
+diff --git a/th02_main.asm b/th02_main.asm
+index c17be241..be522f03 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -601,11 +601,6 @@ _CIRCLE_DOT_PATTERNS	db    0
+ 		db 0E0h
+ 		db 0F0h
+ 		db 0F8h
+-public _rank, _stage_id
+-_rank	db RANK_NORMAL
+-_stage_id	db 0
+-public _aHuuma_cfg
+-_aHuuma_cfg	db 'huuma.cfg',0
+ 
+ 
+ 

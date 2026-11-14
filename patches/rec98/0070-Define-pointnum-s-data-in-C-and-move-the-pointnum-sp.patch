@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:13:44 +0100
+Subject: [PATCH] Define pointnum's data in C++ and move the pointnum sprites
+ into pointnum_put()'s module
+
+---
+ Tupfile.lua                      | 3 +--
+ th02/main/pointnum/num_put_m.asm | 2 +-
+ th02/main/pointnum/pointnum.cpp  | 3 ++-
+ th02_main.asm                    | 3 ---
+ 4 files changed, 4 insertions(+), 7 deletions(-)
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index 8b87ad9c..44a05984 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -519,7 +519,6 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/main_01a.cpp",
+ 	{ "th02_main.asm", extra_inputs = {
+ 		th02_sprites["pellet"],
+-		th02_sprites["pointnum"],
+ 	} },
+ 	"th02/zunerror.cpp",
+ 	"th02/keydelay.cpp",
+@@ -553,7 +552,7 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/main_01d.cpp",
+ 	"th02/main_01e.cpp",
+ 	"th02/pointnum.cpp",
+-	"th02/main/pointnum/num_put_m.asm",
++	{ "th02/main/pointnum/num_put_m.asm", extra_inputs = th02_sprites["pointnum"] },
+ 	"th02/main/player/shot.cpp",
+ 	"th02/main/boss/explode.cpp",
+ 	"th02/bullet.cpp",
+diff --git a/th02/main/pointnum/num_put_m.asm b/th02/main/pointnum/num_put_m.asm
+index 140ae265..2b3e652a 100644
+--- a/th02/main/pointnum/num_put_m.asm
++++ b/th02/main/pointnum/num_put_m.asm
+@@ -14,7 +14,7 @@ PLANE_SIZE = (ROW_SIZE * RES_Y)
+ POINTNUM_H = 8
+ 
+ _DATA	segment word public 'DATA' use16
+-	extrn _sPOINTNUMS:byte
++include th02/sprites/pointnum.asp
+ _DATA	ends
+ 
+ DGROUP group _DATA
+diff --git a/th02/main/pointnum/pointnum.cpp b/th02/main/pointnum/pointnum.cpp
+index f3a215e9..ef13bcfc 100644
+--- a/th02/main/pointnum/pointnum.cpp
++++ b/th02/main/pointnum/pointnum.cpp
+@@ -117,9 +117,10 @@ void near pointnums_invalidate(void)
+ 	}
+ }
+ 
++uint16_t FOUR_DIGIT_POWERS_OF_10[POINTNUM_DIGITS] = { 1000, 100, 10, 1 };
++
+ void pascal near pointnum_render(screen_x_t left, vram_y_t top, uint16_t points)
+ {
+-	extern uint16_t FOUR_DIGIT_POWERS_OF_10[POINTNUM_DIGITS];
+ 
+ 	int i;
+ 	bool past_leading_zeroes = false;
+diff --git a/th02_main.asm b/th02_main.asm
+index 7891ff95..2504e19f 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -635,9 +635,6 @@ include th02/gaiji/gameover[data].asm
+ public _asc_1E47E
+ _asc_1E47E	db '                ',0
+ 		db 0
+-public _FOUR_DIGIT_POWERS_OF_10
+-_FOUR_DIGIT_POWERS_OF_10 dw 1000, 100, 10, 1
+-include th02/sprites/pointnum.asp
+ 
+ 
+ 

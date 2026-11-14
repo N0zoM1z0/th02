@@ -3,7 +3,7 @@
 ## State
 
 - OP.EXE, MAIN.EXE, MAINE.EXE and ZUN.COM are identical to the originals as
-  whole files, from a cold build of the patch series (`session5-cold9`).
+  whole files, from a cold build of the patch series (`session5-cold10`).
 - Work lives on branch `th02-recon` of the ReC98 worktree
   `.analysis/work/rec98` and is exported as `patches/rec98/*.patch`
   (`git format-patch b6ba5b0a52..th02-recon`). `scripts/build_th02.py`
@@ -20,15 +20,13 @@ All ZUN C code in MAIN is C++. What remains assembly:
   The final `damage` reload follows the 16-bit `add` into `score_delta`.
 - `pointnum_put()` and `shots_hittest()` are both preceded by a `00` pad,
   i.e. word-aligned modules, which TCC never emits.
-- master.lib code and data stay in assembly. ZUN data is defined in its C++
-  TUs (string literals included) for `main_01a.cpp`, `main_05.cpp`, the
-  HUD, items, player, bombs, sparks (sprites via bmp2arr's C++ output; the
-  spark TU is linked after the bombs, where its data sits), stage 3, dialog,
-  Rika, Meira, `regist_m.cpp`, Sigma, the enemies, Mima and Marisa. The rest
-  is still in `th02_main.asm`, ending with the block from `scroll_interval`
-  to `power_overflow`. By position it belongs to the shot, explode and
-  bullet TUs (linked between pointnum and items); the split between them is
-  not yet clear.
+- All of ZUN's initialized data, string literals included, is defined in C++
+  (or in ZUN's own asm modules) in all three EXEs; the `_DATA` of
+  `th02_*.asm` is master.lib only. Shared TUs are compiled once for every
+  binary, so shared data had to sit where it fits all of them
+  (`keydelay.cpp`, `frmdely1`'s neighbours `maine022.cpp`/`main02_2.cpp`,
+  pfopen's data in `pf.asm`). Uninitialized variables (`.data?`) are still
+  declared in assembly.
 
 ## Loop
 
@@ -183,5 +181,5 @@ boundaries, which the target's relocation table records:
 
 ## Next useful actions
 
-1. Continue moving data out of `th02_main.asm` from its end: the shot /
-   explode / bullet block is next.
+1. Uninitialized variables: move `.data?` declarations into their TUs (TCC
+   emits `_BSS` per TU in link order, like `_DATA`).

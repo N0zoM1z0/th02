@@ -1,0 +1,210 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:20:15 +0100
+Subject: [PATCH] Define MAIN's remaining ZUN data in C++
+
+key_delay_groups moves into keydelay.cpp and pfopen's data into the pf
+module, for MAIN and MAINE alike. MAIN's sound data (data.c) gets its own
+TU after frmdely1, where maine022.cpp sits in MAINE; pf_fn is the MPN
+loader's pooled constant; the sound effect tables follow snd_se in a
+small TU of their own. th02_main.asm's _DATA is master.lib only now.
+---
+ Tupfile.lua                |  2 ++
+ th02/formats/mpn_l_i.cpp   |  8 +++++++-
+ th02/hardware/keydelay.cpp |  3 ++-
+ th02/main/pf.asm           |  2 +-
+ th02/main02_2.cpp          | 11 +++++++++++
+ th02/main02_3.cpp          |  9 +++++++++
+ th02_main.asm              | 15 +--------------
+ th02_maine.asm             |  6 +-----
+ th02_op.asm                |  3 +--
+ 9 files changed, 35 insertions(+), 24 deletions(-)
+ create mode 100644 th02/main02_2.cpp
+ create mode 100644 th02/main02_3.cpp
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index 350e6737..33880e16 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -531,6 +531,7 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/main/mpn_put.cpp",
+ 	"th02/main/pf.asm",
+ 	"th02/frmdely1.cpp",
++	"th02/main02_2.cpp",
+ 	"th02/input_rs.cpp",
+ 	"th02/exit.cpp",
+ 	"th02/snd_mmdr.c",
+@@ -545,6 +546,7 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/snd_dlym.cpp",
+ 	"th02/snd_se_r.cpp",
+ 	"th02/snd_se.cpp",
++	"th02/main02_3.cpp",
+ 	"th02/main/dots.cpp",
+ 	"th02/main_rr.cpp",
+ 	"th02/main_cfg.cpp",
+diff --git a/th02/formats/mpn_l_i.cpp b/th02/formats/mpn_l_i.cpp
+index 0a2eee39..c25e76f5 100644
+--- a/th02/formats/mpn_l_i.cpp
++++ b/th02/formats/mpn_l_i.cpp
+@@ -4,6 +4,13 @@
+ #include "libs/master.lib/master.hpp"
+ #include "th02/formats/tile.hpp"
+ #include "th02/formats/mpn.hpp"
++#include "th02/shiftjis/fns.hpp"
++
++bool mpn_show_palette_on_load = true;
++uint8_t mpn_count = 0;
++
++// Used by game_init_main().
++extern const char pf_fn[] = PF_FN;
+ 
+ // TH04 copied this code and adjusted it to work with multiple .MPN slots.
+ 
+@@ -15,7 +22,6 @@ void mpn_palette_show(void)
+ 
+ int pascal mpn_load_palette_show(const char *fn)
+ {
+-	extern bool mpn_show_palette_on_load;
+ 	mpn_header_t header;
+ 
+ 	file_ropen(fn);
+diff --git a/th02/hardware/keydelay.cpp b/th02/hardware/keydelay.cpp
+index a2da594a..7dc06baa 100644
+--- a/th02/hardware/keydelay.cpp
++++ b/th02/hardware/keydelay.cpp
+@@ -4,9 +4,10 @@
+ #include "th02/hardware/input.hpp"
+ #include "th02/hardware/frmdelay.h"
+ 
++char key_delay_groups[3] = { 5, 3, 0 };
++
+ int key_delay_sense(void)
+ {
+-	extern char key_delay_groups[3];
+ 	int ret;
+ 	ret  = key_sense(key_delay_groups[0]);
+ 	ret |= key_sense(key_delay_groups[1]);
+diff --git a/th02/main/pf.asm b/th02/main/pf.asm
+index eb91bbcd..c026556e 100644
+--- a/th02/main/pf.asm
++++ b/th02/main/pf.asm
+@@ -14,8 +14,8 @@ include ReC98.inc
+ 	extrn pfint21_handle:word
+ 	extrn pferrno:word
+ 	extrn pfkey:byte
+-	extrn pf_limit:byte
+ 	extrn mem_AllocID:word
++include th02/formats/pfopen[data].asm
+ 
+ TEXT group _TEXT
+ _TEXT	segment	word public 'CODE' use16
+diff --git a/th02/main02_2.cpp b/th02/main02_2.cpp
+new file mode 100644
+index 00000000..b5206202
+--- /dev/null
++++ b/th02/main02_2.cpp
+@@ -0,0 +1,11 @@
++/* ReC98
++ * -----
++ * Sound data of TH02's MAIN.EXE, in the same place of code segment #2 as
++ * maine022.cpp in MAINE.EXE
++ */
++
++#pragma option -zCSHARED
++
++#include "platform.h"
++
++#include "th02/snd/data.c"
+diff --git a/th02/main02_3.cpp b/th02/main02_3.cpp
+new file mode 100644
+index 00000000..d0e4ed95
+--- /dev/null
++++ b/th02/main02_3.cpp
+@@ -0,0 +1,9 @@
++/* ReC98
++ * -----
++ * Sound effect data of TH02's MAIN.EXE, after the sound effect code in code
++ * segment #2
++ */
++
++#pragma option -zCSHARED
++
++#include "th02/snd/se_data.c"
+diff --git a/th02_main.asm b/th02_main.asm
+index b31cc50f..a20d421b 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -184,7 +184,7 @@ include libs/master.lib/super_roll_put_tiny.asm
+ include libs/master.lib/super_convert_tiny.asm
+ include libs/master.lib/super_zoom.asm
+ 
+-	public parfilename, pfint21_pf, pfint21_handle, pferrno, pfkey, pf_limit
++	public parfilename, pfint21_pf, pfint21_handle, pferrno, pfkey
+ 	public mem_AllocID
+ 	extrn PFOPEN:far, PFSTART:far, PFEND:far
+ 
+@@ -581,19 +581,6 @@ include libs/master.lib/wordmask[data].asm
+ include libs/master.lib/mem[data].asm
+ include libs/master.lib/super_entry_bfnt[data].asm
+ include libs/master.lib/superpa[data].asm
+-public _key_delay_groups
+-_key_delay_groups	db 5, 3, 0
+-		db 0
+-include th02/formats/pfopen[data].asm
+-public _snd_active
+-_snd_active	db 0
+-		db 0
+-public _mpn_show_palette_on_load, _mpn_count
+-_mpn_show_palette_on_load	db 1
+-_mpn_count	db 0
+-public _pf_fn
+-_pf_fn		db '“Œ•û••–‚.˜^',0
+-include th02/snd/se[data].asm
+ 
+ 
+ 
+diff --git a/th02_maine.asm b/th02_maine.asm
+index e280f864..3280e142 100644
+--- a/th02_maine.asm
++++ b/th02_maine.asm
+@@ -107,7 +107,7 @@ include libs/master.lib/super_entry_pat.asm
+ include libs/master.lib/super_entry_at.asm
+ include libs/master.lib/super_entry_bfnt.asm
+ 
+-	public parfilename, pfint21_pf, pfint21_handle, pferrno, pfkey, pf_limit
++	public parfilename, pfint21_pf, pfint21_handle, pferrno, pfkey
+ 	public mem_AllocID
+ 	extrn PFOPEN:far, PFSTART:far, PFEND:far
+ _TEXT		ends
+@@ -192,10 +192,6 @@ vsync_OldMask	db	0
+ include libs/master.lib/mem[data].asm
+ include libs/master.lib/super_entry_bfnt[data].asm
+ include libs/master.lib/superpa[data].asm
+-public _key_delay_groups
+-_key_delay_groups	db 5, 3, 0
+-		db 0
+-include th02/formats/pfopen[data].asm
+ 
+ 	.data?
+ 
+diff --git a/th02_op.asm b/th02_op.asm
+index 38f89c94..a7cbc9ad 100644
+--- a/th02_op.asm
++++ b/th02_op.asm
+@@ -113,7 +113,7 @@ include libs/master.lib/super_put_rect.asm
+ 		db 0
+ include libs/master.lib/super_put.asm
+ 
+-	public parfilename, pfint21_pf, pfint21_handle, pferrno, pfkey, pf_limit
++	public parfilename, pfint21_pf, pfint21_handle, pferrno, pfkey
+ 	public mem_AllocID
+ 	extrn PFOPEN:far, PFSTART:far, PFEND:far
+ _TEXT		ends
+@@ -159,7 +159,6 @@ include libs/master.lib/wordmask[data].asm
+ include libs/master.lib/mem[data].asm
+ include libs/master.lib/super_entry_bfnt[data].asm
+ include libs/master.lib/superpa[data].asm
+-include th02/formats/pfopen[data].asm
+ 
+ 	.data?
+ 

@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:17:01 +0100
+Subject: [PATCH] Define the dot patterns in the dots TU, linked after the
+ sound effect code like its data
+
+---
+ Tupfile.lua        | 2 +-
+ th02/main/dots.cpp | 4 +++-
+ th02_main.asm      | 7 -------
+ 3 files changed, 4 insertions(+), 9 deletions(-)
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index 5347f3f2..350e6737 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -530,7 +530,6 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/vector.cpp",
+ 	"th02/main/mpn_put.cpp",
+ 	"th02/main/pf.asm",
+-	"th02/main/dots.cpp",
+ 	"th02/frmdely1.cpp",
+ 	"th02/input_rs.cpp",
+ 	"th02/exit.cpp",
+@@ -546,6 +545,7 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/snd_dlym.cpp",
+ 	"th02/snd_se_r.cpp",
+ 	"th02/snd_se.cpp",
++	"th02/main/dots.cpp",
+ 	"th02/main_rr.cpp",
+ 	"th02/main_cfg.cpp",
+ 	{ "th02/main_03.cpp", extra_inputs = th02_pellet_sprite },
+diff --git a/th02/main/dots.cpp b/th02/main/dots.cpp
+index 4ff60b28..87ca36f2 100644
+--- a/th02/main/dots.cpp
++++ b/th02/main/dots.cpp
+@@ -44,7 +44,9 @@ extern uint8_t byte_1FFF9;
+ extern int8_t byte_1FFFA;
+ 
+ // Leftmost [size] bits set, for each dot size.
+-extern const uint8_t CIRCLE_DOT_PATTERNS[];
++extern const uint8_t CIRCLE_DOT_PATTERNS[] = {
++	0x00, 0x80, 0xC0, 0xE0, 0xF0, 0xF8
++};
+ 
+ extern bool reduce_effects;
+ extern uint8_t byte_20168;
+diff --git a/th02_main.asm b/th02_main.asm
+index be522f03..b31cc50f 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -594,13 +594,6 @@ _mpn_count	db 0
+ public _pf_fn
+ _pf_fn		db '“Œ•û••–‚.˜^',0
+ include th02/snd/se[data].asm
+-public _CIRCLE_DOT_PATTERNS
+-_CIRCLE_DOT_PATTERNS	db    0
+-		db  80h
+-		db 0C0h
+-		db 0E0h
+-		db 0F0h
+-		db 0F8h
+ 
+ 
+ 

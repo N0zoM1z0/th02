@@ -1,0 +1,115 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:13:19 +0100
+Subject: [PATCH] Define the shot, explode and bullet TUs' data in C++
+
+---
+ th02/main/boss/explode.cpp  |  2 +-
+ th02/main/bullet/bullet.cpp | 11 +++++++++++
+ th02/main/player/shot.cpp   | 10 +++++++---
+ th02_main.asm               | 28 ----------------------------
+ 4 files changed, 19 insertions(+), 32 deletions(-)
+
+diff --git a/th02/main/boss/explode.cpp b/th02/main/boss/explode.cpp
+index 6d2222aa..aac8f863 100644
+--- a/th02/main/boss/explode.cpp
++++ b/th02/main/boss/explode.cpp
+@@ -26,7 +26,7 @@ extern "C" void MASTER_RET graph_scroll(
+ 	unsigned line1, unsigned adr1, unsigned adr2
+ );
+ 
+-extern unsigned char angle_1E510;
++unsigned char angle_1E510 = 0x20;
+ extern uint8_t stone_unknown[STONE_COUNT];
+ extern uint8_t byte_2066A;
+ extern uint8_t byte_2066B;
+diff --git a/th02/main/bullet/bullet.cpp b/th02/main/bullet/bullet.cpp
+index 1b6fbae2..0daa1933 100644
+--- a/th02/main/bullet/bullet.cpp
++++ b/th02/main/bullet/bullet.cpp
+@@ -71,6 +71,17 @@ static const subpixel_t SPEED_MIN = TO_SP(1);
+ #define screen_top 	bullet_screen_top
+ #define stack      	bullet_stack
+ 
++// Player data, defined in this TU.
++int player_patnum = PAT_PLAYCHAR_STILL; // ACTUAL TYPE: main_patnum_t
++int unused_1E516 = 0;
++uint8_t power = 1;
++bool miss_active = false;
++int8_t shot_option_frames_per_age = 4;
++uint8_t shot_param_1 = 0x40;
++uint8_t shot_param_2 = 0x4C;
++main_patnum_t player_option_patnum = PAT_OPTION_A;
++int power_overflow = 0;
++
+ extern bullet_t bullets[BULLET_COUNT];
+ 
+ extern screen_x_t screen_left;
+diff --git a/th02/main/player/shot.cpp b/th02/main/player/shot.cpp
+index 2dfa931f..4960155d 100644
+--- a/th02/main/player/shot.cpp
++++ b/th02/main/player/shot.cpp
+@@ -23,9 +23,11 @@ extern int scroll_unused;
+ extern vram_offset_t scroll_line_vo;
+ extern int tile_rows_scrolled;
+ extern int16_t tile_row_scrolled;
+-extern uint8_t scroll_speed_this_frame;
++uint8_t scroll_interval = 4;
++bool scroll_done = false;
++uint8_t byte_1E502 = 0;
++uint8_t scroll_speed_this_frame = 0;
+ extern uint8_t byte_2034E;
+-extern uint8_t byte_1E502;
+ 
+ void sub_CA1C(void)
+ {
+@@ -55,7 +57,9 @@ extern int8_t shot_option_frames_per_age;
+ extern int shot_target_left;
+ extern int shot_target_top;
+ extern int shot_target_left_unused;
+-extern const int SHOT_BIG_HIT_PATNUMS[];
++extern const int SHOT_BIG_HIT_PATNUMS[] = {
++	0x27, 0x27, 0x27, 0x28, 0x29, 0x2F
++};
+ 
+ // ZUN set each of these byte pairs with a single 16-bit store.
+ #define shot_byte_pair_set(p, field, lo, hi) ( \
+diff --git a/th02_main.asm b/th02_main.asm
+index 2d8ffbbf..7891ff95 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -638,34 +638,6 @@ _asc_1E47E	db '                ',0
+ public _FOUR_DIGIT_POWERS_OF_10
+ _FOUR_DIGIT_POWERS_OF_10 dw 1000, 100, 10, 1
+ include th02/sprites/pointnum.asp
+-public _scroll_interval, _scroll_done
+-_scroll_interval	db 4
+-_scroll_done	db 0
+-public _byte_1E502
+-_byte_1E502	db 0
+-public _scroll_speed_this_frame
+-_scroll_speed_this_frame	db 0
+-public _SHOT_BIG_HIT_PATNUMS
+-_SHOT_BIG_HIT_PATNUMS	dw 27h, 27h, 27h, 28h, 29h, 2Fh
+-public _angle_1E510
+-_angle_1E510	db 20h
+-		db 0
+-public _player_patnum
+-_player_patnum	dw PAT_PLAYCHAR_STILL
+-		db    0
+-		db    0
+-public _power, _miss_active
+-_power	db 1
+-_miss_active	db 0
+-public _shot_option_frames_per_age
+-_shot_option_frames_per_age	db 4
+-public _shot_param_1
+-_shot_param_1	db 40h
+-public _shot_param_2
+-_shot_param_2	db 4Ch
+-public _player_option_patnum, _power_overflow
+-_player_option_patnum	db PAT_OPTION_A
+-_power_overflow	dw 0
+ 
+ 
+ 
