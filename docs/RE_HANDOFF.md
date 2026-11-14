@@ -161,7 +161,10 @@ boundaries, which the target's relocation table records:
   which keeps TASM from shortening it). This fixed OP's header size.
 - MAINE.EXE's original header starts the relocation table at `0x1C` and is
   only paragraph-aligned, without TLINK's `0x3E` layout: it was rewritten by
-  another tool after linking. Everything after the header matches.
+  another tool after linking. Everything after the header matches. The
+  layout is what UNLZEXE writes, so the file may have been LZEXE-packed and
+  unpacked again at some point; `SS:SP` and the allocation fields are
+  TLINK's.
 - Original TUs found this way: `main_01a.cpp` plus the stage loop up to
   `DemoPlay()`; the random number ring; `cfg_load()`; the game over menu;
   `GameExecl()` with `sub_C5B0()`; `player_invalidate()`; bombanim with the
