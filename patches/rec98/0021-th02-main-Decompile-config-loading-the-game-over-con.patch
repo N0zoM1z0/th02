@@ -1,0 +1,1123 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 21:01:51 +0100
+Subject: [PATCH] [th02/main] Decompile config loading, the game over/continue
+ menu, GameExecl() and player initialization
+
+The game over menu compares the high score unsigned, so the resident
+structure's [score_highest] is unsigned. TCC accepts a mid-file
+`#pragma option -G` for player_invalidate().
+---
+ Tupfile.lua                   |   1 +
+ th02/gaiji/gameover[data].asm |  11 +-
+ th02/main_01c.cpp             | 296 ++++++++++++++++++
+ th02/resident.hpp             |   2 +-
+ th02_main.asm                 | 549 ++++------------------------------
+ 5 files changed, 360 insertions(+), 499 deletions(-)
+ create mode 100644 th02/main_01c.cpp
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index 7f97edc9..27b9869d 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -526,6 +526,7 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/main02_1.cpp",
+ 	"th02/main_01a.cpp",
+ 	"th02/main_01b.cpp",
++	"th02/main_01c.cpp",
+ 	"th01/vplanset.cpp",
+ 	"th02/pi_load.cpp",
+ 	"th02/vector.cpp",
+diff --git a/th02/gaiji/gameover[data].asm b/th02/gaiji/gameover[data].asm
+index 9d60f1e7..5d89d6ec 100644
+--- a/th02/gaiji/gameover[data].asm
++++ b/th02/gaiji/gameover[data].asm
+@@ -1,5 +1,6 @@
+-gGAMEOVER	db 0B0h, 0AAh, 0B7h, 0AEh, 0B8h, 0BFh, 0AEh, 0BBh, 0
+-gCONTINUE?	db 0ACh, 0B8h, 0B6h, 0BDh, 0B2h, 0B6h, 0BEh, 0AEh, 0DDh, 0
+-gYES		db 0C2h, 0AEh, 0BCh, 0
+-gNO		db 0B6h, 0B8h, 0, 0
+-gCREDIT		db 0ACh, 0BBh, 0AEh, 0ADh, 0B2h, 0BDh, 0
++public _gGAMEOVER, _gCONTINUE, _gYES, _gNO, _gCREDIT
++_gGAMEOVER	db 0B0h, 0AAh, 0B7h, 0AEh, 0B8h, 0BFh, 0AEh, 0BBh, 0
++_gCONTINUE	db 0ACh, 0B8h, 0B6h, 0BDh, 0B2h, 0B6h, 0BEh, 0AEh, 0DDh, 0
++_gYES		db 0C2h, 0AEh, 0BCh, 0
++_gNO		db 0B6h, 0B8h, 0, 0
++_gCREDIT		db 0ACh, 0BBh, 0AEh, 0ADh, 0B2h, 0BDh, 0
+diff --git a/th02/main_01c.cpp b/th02/main_01c.cpp
+new file mode 100644
+index 00000000..d8d11754
+--- /dev/null
++++ b/th02/main_01c.cpp
+@@ -0,0 +1,296 @@
++/* ReC98
++ * -----
++ * Configuration loading, the game over and continue menu, process switching
++ * and player initialization of TH02's MAIN.EXE, at the end of code segment #1
++ */
++
++#pragma option -zPmain_01
++
++#include <stddef.h>
++#include <process.h>
++#include "platform.h"
++#include "x86real.h"
++#include "pc98.h"
++#include "libs/master.lib/master.hpp"
++#include "libs/master.lib/pc98_gfx.hpp"
++#include "th02/resident.hpp"
++#include "th01/rank.h"
++#include "th02/core/globals.hpp"
++#include "th02/gaiji/gaiji.h"
++#include "th02/hardware/frmdelay.h"
++#include "th02/hardware/input.hpp"
++#include "th02/hardware/pages.hpp"
++#include "th02/formats/mpn.hpp"
++#include "th02/formats/pi.h"
++#include "th02/hiscore/regist.h"
++#include "th02/main/main.hpp"
++#include "th02/main/playperf.hpp"
++#include "th02/main/score.hpp"
++#include "th02/main/hud/overlay.hpp"
++#include "th02/main/item/item.hpp"
++#include "th02/main/player/player.hpp"
++#include "th02/main/stage/stage.hpp"
++#include "th02/main/tile/tile.hpp"
++
++extern const char aHuuma_cfg[];
++
++int near cfg_load(void)
++{
++	resident_t __seg *resident_seg;
++
++	file_ropen(aHuuma_cfg);
++	file_seek(5, 0);
++	file_read(&resident_seg, sizeof(resident_seg));
++	file_close();
++	if(resident_seg) {
++		resident = resident_seg;
++		stage_id = resident->stage;
++		lives = resident->start_lives;
++		bombs = resident->start_bombs;
++		rank = resident->rank;
++		power = resident->start_power;
++		if(power == 0) {
++			power++;
++		}
++		playperf = 0;
++		item_bigpower_override = 0;
++		return 1;
++	}
++	return 0;
++}
++
++extern const unsigned char gYES[];
++extern const unsigned char gNO[];
++extern const unsigned char gGAMEOVER[];
++extern const unsigned char gCONTINUE[];
++extern const unsigned char gCREDIT[];
++extern const char asc_1E47E[];
++
++void pascal near continue_choice_put(int yes_atrb, int no_atrb)
++{
++	gaiji_putsa(24, 14, gYES, yes_atrb);
++	gaiji_putsa(25, 15, gNO, no_atrb);
++}
++
++int near gameover_and_continue_menu(void)
++{
++	int input_state = 0;
++	int i;
++	int choice = 1;
++
++	asm { nop; push cs; call near ptr overlay_stage_leave_animate; }
++	PaletteTone = 50;
++	palette_show();
++	asm { nop; push cs; call near ptr overlay_stage_enter_animate; }
++	for(i = 21; i >= 12; i--) {
++		text_putsa(18, (i + 1), asc_1E47E, TX_WHITE);
++		gaiji_putsa(18, i, gGAMEOVER, TX_WHITE);
++		text_putsa(18, (23 - i), asc_1E47E, TX_WHITE);
++		gaiji_putsa(18, (24 - i), gGAMEOVER, TX_WHITE);
++		text_putsa((29 - i), 12, asc_1E47E, TX_WHITE);
++		gaiji_putsa((30 - i), 12, gGAMEOVER, TX_WHITE);
++		text_putsa((i + 7), 12, asc_1E47E, TX_WHITE);
++		gaiji_putsa((i + 6), 12, gGAMEOVER, TX_WHITE);
++		frame_delay(1);
++	}
++	frame_delay(30);
++	key_det = 0;
++	while(key_det == 0) {
++		input_reset_sense();
++	}
++	overlay_wipe();
++	regist_menu();
++	overlay_wipe();
++	if((resident->continues_used < 3) && (rank < RANK_EXTRA)) {
++		gaiji_putsa(18, 12, gCONTINUE, TX_WHITE);
++		continue_choice_put((TX_WHITE | TX_REVERSE), TX_WHITE);
++		gaiji_putsa(18, 20, gCREDIT, TX_GREEN);
++		i = (gb_3 - resident->continues_used);
++		gaiji_putca(32, 20, i, TX_GREEN);
++		choice = 1;
++		while(1) {
++			input_reset_sense();
++			if((input_state == 0) && (key_det == 0)) {
++				input_state = 1;
++			} else if((input_state == 1) && (key_det != 0)) {
++				input_state = 2;
++			}
++			if(key_det & INPUT_UP) {
++				choice = 1;
++				continue_choice_put((TX_WHITE | TX_REVERSE), TX_WHITE);
++			}
++			if(key_det & INPUT_DOWN) {
++				choice = 0;
++				continue_choice_put(TX_WHITE, (TX_WHITE | TX_REVERSE));
++			}
++			if((input_state == 2) && (
++				(key_det & INPUT_SHOT) ||
++				(key_det & INPUT_OK) ||
++				(key_det & INPUT_CANCEL)
++			)) {
++				break;
++			}
++			frame_delay(1);
++		}
++		if(key_det & INPUT_CANCEL) {
++			choice = 0;
++		}
++	} else {
++		choice = 0;
++	}
++	resident->score_highest = (resident->score_highest < score)
++		? score
++		: resident->score_highest;
++	lives = resident->start_lives;
++	bombs = resident->start_bombs;
++	power = POWER_MIN;
++	resident->continues_used++;
++	score_reset();
++	item_bigpower_override = ((stage_id % 5) + 2);
++	power_overflow = 10;
++	PaletteTone = 100;
++	palette_show();
++	overlay_wipe();
++	return choice;
++}
++
++void near sub_E24A(void);
++void stage_data_free(void);
++void near gaiji_free(void);
++void game_exit(void);
++
++int GameExecl(char *binary_fn)
++{
++	pi_free(0);
++	sub_E24A();
++	mpn_free();
++	stage_data_free();
++	super_free();
++	graph_clear();
++	text_clear();
++	gaiji_free();
++	game_exit();
++	return execl(binary_fn, binary_fn, NULL);
++}
++
++struct shot_t {
++	uint8_t flag;
++	int8_t unknown[15];
++};
++
++static const int SHOT_COUNT = 38;
++
++extern shot_t shots[SHOT_COUNT];
++extern uint8_t byte_205DE;
++extern uint8_t byte_205DF;
++extern uint8_t byte_205E0;
++extern uint8_t stage_miss_count;
++extern int word_205D8;
++extern int word_205DA;
++extern int word_205DC;
++extern uint8_t byte_20611;
++extern uint8_t byte_1E518;
++extern int8_t playchar_speed_aligned_x;
++extern int8_t playchar_speed_aligned_y;
++extern int8_t playchar_speed_diagonal_x;
++extern int8_t playchar_speed_diagonal_y;
++extern void (near *playchar_shot_func)(void);
++extern uint8_t shot_max_param_1;
++extern uint8_t shot_max_param_2;
++extern int8_t shot_max_spread;
++void near shot_a(void);
++void near shot_b(void);
++void near shot_c(void);
++
++void near sub_C5B0(void)
++{
++	int i;
++	for(i = 0; i < SHOT_COUNT; i++) {
++		shots[i].flag = 0;
++	}
++	byte_205DE = 0;
++	player_invincibility_time = 0;
++	player_invincible_via_bomb = false;
++	quit = false;
++	stage_miss_count = 0;
++	miss_frame = 0;
++	byte_205DF = 8;
++	byte_205E0 = 0;
++	player_is_hit = false;
++	miss_active = false;
++	player_option_patnum = PAT_OPTION_A;
++	word_205D8 = -1;
++	word_205DC = -1;
++	word_205DA = -1;
++	shot_max_spread = 0;
++	byte_20611 = 0;
++	switch(resident->shottype) {
++	case 0:
++		playchar_shot_func = shot_a;
++		playchar_speed_aligned_x = 5;
++		playchar_speed_aligned_y = 5;
++		playchar_speed_diagonal_x = 4;
++		playchar_speed_diagonal_y = 4;
++		shot_max_param_1 = 48;
++		break;
++	case 1:
++		playchar_shot_func = shot_b;
++		playchar_speed_aligned_x = 4;
++		playchar_speed_aligned_y = 4;
++		playchar_speed_diagonal_x = 3;
++		playchar_speed_diagonal_y = 3;
++		shot_max_param_1 = 52;
++		shot_max_param_2 = 55;
++		player_option_patnum++;
++		break;
++	case 2:
++		playchar_shot_func = shot_c;
++		playchar_speed_aligned_x = 3;
++		playchar_speed_aligned_y = 3;
++		playchar_speed_diagonal_x = 3;
++		playchar_speed_diagonal_y = 3;
++		byte_1E518 = 3;
++		shot_max_param_1 = 125;
++		shot_max_param_2 = 59;
++		player_option_patnum += 2;
++		break;
++	}
++}
++
++#pragma option -G
++
++void near sub_D38F(void);
++
++void near player_invalidate(void)
++{
++	int unused = 2;
++	screen_x_t option_left;
++
++	sub_D38F();
++	player_left_on_back_page = &player_left_on_page[page_back];
++	player_top_on_back_page = &player_top_on_page[page_back];
++	player_option_left_left_on_back_page = (
++		&player_option_left_topleft[page_back].x
++	);
++	player_option_left_top_on_back_page = (
++		&player_option_left_topleft[page_back].y
++	);
++	tiles_invalidate_rect(
++		*player_left_on_back_page, *player_top_on_back_page, PLAYER_W, PLAYER_H
++	);
++	option_left = *player_option_left_left_on_back_page;
++	tiles_invalidate_rect(
++		option_left,
++		*player_option_left_top_on_back_page,
++		PLAYER_OPTION_W,
++		PLAYER_OPTION_H
++	);
++	tiles_invalidate_rect(
++		(option_left + PLAYER_OPTION_TO_OPTION_DISTANCE),
++		*player_option_left_top_on_back_page,
++		PLAYER_OPTION_W,
++		PLAYER_OPTION_H
++	);
++	*player_left_on_back_page = player_left_on_page[page_front];
++	*player_top_on_back_page = player_top_on_page[page_front];
++}
+diff --git a/th02/resident.hpp b/th02/resident.hpp
+index c7fcee3c..0a1b6427 100644
+--- a/th02/resident.hpp
++++ b/th02/resident.hpp
+@@ -29,7 +29,7 @@ struct resident_t {
+ 	uint8_t demo_num;
+ 	int skill;
+ 	int unused_4;
+-	long score_highest;
++	uint32_t score_highest;
+ };
+ 
+ extern resident_t far *resident;
+diff --git a/th02_main.asm b/th02_main.asm
+index 57f8cadd..21602efe 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -73,7 +73,7 @@ FACE_EXRIKA_SMILE = 153
+ FACE_EXRIKA_FROWN = 156
+ FACE_COL_0 = 255
+ 
+-main_01 group main_01_TEXT, MAIN_01A_TEXT, MAIN_01B_TEXT, main_01c_TEXT, POINTNUM_TEXT, main_01__TEXT, ITEM_TEXT, HUD_TEXT, main_01___TEXT, PLAYER_B_TEXT, PLAYER_TEXT, main_01____TEXT
++main_01 group main_01_TEXT, MAIN_01A_TEXT, MAIN_01B_TEXT, MAIN_01C_TEXT, POINTNUM_TEXT, main_01__TEXT, ITEM_TEXT, HUD_TEXT, main_01___TEXT, PLAYER_B_TEXT, PLAYER_TEXT, main_01____TEXT
+ main_03 group main_03_TEXT, BULLET_TEXT, DIALOG_TEXT, BOSS_5_TEXT, main_03__TEXT
+ main_06 group REGIST_M_TEXT, main_06_TEXT
+ 
+@@ -705,7 +705,7 @@ _envp		= dword	ptr  0Ch
+ 
+ 		push	bp
+ 		mov	bp, sp
+-		call	cfg_load
++		call	@cfg_load$qv
+ 		or	ax, ax
+ 		jz	short @@cfg_load_is_1
+ 		call	@game_init_main$qv
+@@ -808,7 +808,7 @@ loc_B263:
+ 		les	bx, _resident
+ 		cmp	es:[bx+mikoconfig_t.demo_num], 0
+ 		jnz	short loc_B287
+-		call	sub_C31F
++		call	@gameover_and_continue_menu$qv
+ 		or	ax, ax
+ 		jz	short loc_B27A
+ 		call	@stage_continue_reset$qv
+@@ -831,7 +831,7 @@ loc_B290:
+ 		call	far ptr	palette_show
+ 		push	ds
+ 		push	offset arg0	; "op"
+-		nopcall	@GameExecl$qnxc
++		nopcall	@GameExecl$qnc
+ 		add	sp, 4
+ 		xor	ax, ax
+ 		pop	bp
+@@ -942,465 +942,13 @@ MAIN_01B_TEXT	segment	byte public 'CODE' use16
+ 	extern @randring1_next16$qv:near
+ MAIN_01B_TEXT	ends
+ 
+-main_01c_TEXT	segment	byte public 'CODE' use16
+-		assume cs:main_01
+-public CFG_LOAD
+-cfg_load	proc near
+-
+-@@resident_seg		= word ptr -2
+-
+-		enter	2, 0
+-		push	ds
+-		push	offset aHuuma_cfg ; "huuma.cfg"
+-		call	file_ropen
+-		pushd	5
+-		push	0
+-		call	file_seek
+-		push	ss
+-		lea	ax, [bp+@@resident_seg]
+-		push	ax
+-		push	2
+-		call	file_read
+-		call	file_close
+-		cmp	[bp+@@resident_seg], 0
+-		jz	short loc_C2F0
+-		mov	ax, [bp+@@resident_seg]
+-		mov	word ptr _resident+2, ax
+-		mov	word ptr _resident, 0
+-		les	bx, _resident
+-		mov	al, es:[bx+mikoconfig_t.stage]
+-		mov	_stage_id, al
+-		mov	al, es:[bx+mikoconfig_t.start_lives]
+-		mov	_lives, al
+-		mov	al, es:[bx+mikoconfig_t.start_bombs]
+-		mov	_bombs, al
+-		mov	al, es:[bx+mikoconfig_t.rank]
+-		mov	_rank, al
+-		mov	al, es:[bx+mikoconfig_t.start_power]
+-		mov	_power, al
+-		cmp	_power, 0
+-		jnz	short loc_C2DF
+-		inc	_power
+-
+-loc_C2DF:
+-		mov	_playperf, 0
+-		mov	_item_bigpower_override, 0
+-		mov	ax, 1
+-		leave
+-		retn
+-; ---------------------------------------------------------------------------
+-
+-loc_C2F0:
+-		xor	ax, ax
+-		leave
+-		retn
+-cfg_load	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sub_C2F4	proc near
+-
+-arg_0		= word ptr  4
+-arg_2		= word ptr  6
+-
+-		push	bp
+-		mov	bp, sp
+-		push	18000Eh
+-		push	ds
+-		push	offset gYES
+-		push	[bp+arg_2]
+-		call	gaiji_putsa
+-		push	19000Fh
+-		push	ds
+-		push	offset gNO
+-		push	[bp+arg_0]
+-		call	gaiji_putsa
+-		pop	bp
+-		retn	4
+-sub_C2F4	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sub_C31F	proc near
+-
+-var_2		= word ptr -2
+-
+-		enter	2, 0
+-		push	si
+-		push	di
+-		mov	[bp+var_2], 0
+-		mov	di, 1
+-		nopcall	@overlay_stage_leave_animate$qv
+-		mov	PaletteTone, 50
+-		call	far ptr	palette_show
+-		nopcall	@overlay_stage_enter_animate$qv
+-		mov	si, 15h
+-		jmp	loc_C3E5
+-; ---------------------------------------------------------------------------
+-
+-loc_C348:
+-		push	18
+-		lea	ax, [si+1]
+-		push	ax
+-		push	ds
+-		push	offset asc_1E47E ; "		    "
+-		push	TX_WHITE
+-		call	text_putsa
+-		call	gaiji_putsa pascal, 18, si, ds, offset gGAMEOVER, TX_WHITE
+-		push	18
+-		mov	ax, 23
+-		sub	ax, si
+-		push	ax
+-		push	ds
+-		push	offset asc_1E47E ; "		    "
+-		push	TX_WHITE
+-		call	text_putsa
+-		push	18
+-		mov	ax, 24
+-		sub	ax, si
+-		push	ax
+-		push	ds
+-		push	offset gGAMEOVER
+-		push	TX_WHITE
+-		call	gaiji_putsa
+-		mov	ax, 29
+-		sub	ax, si
+-		call	text_putsa pascal, ax, 12, ds, offset asc_1E47E, TX_WHITE
+-		mov	ax, 30
+-		sub	ax, si
+-		call	gaiji_putsa pascal, ax, 12, ds, offset gGAMEOVER, TX_WHITE
+-		lea	ax, [si+7]
+-		call	text_putsa pascal, ax, 12, ds, offset asc_1E47E, TX_WHITE
+-		lea	ax, [si+6]
+-		call	gaiji_putsa pascal, ax, 12, ds, offset gGAMEOVER, TX_WHITE
+-		call	@frame_delay$qi pascal, 1
+-		dec	si
+-
+-loc_C3E5:
+-		cmp	si, 0Ch
+-		jge	loc_C348
+-		call	@frame_delay$qi pascal, 30
+-		mov	_key_det, 0
+-		jmp	short loc_C400
+-; ---------------------------------------------------------------------------
+-
+-loc_C3FB:
+-		call	@input_reset_sense$qv
+-
+-loc_C400:
+-		cmp	_key_det, 0
+-		jz	short loc_C3FB
+-		call	@overlay_wipe$qv
+-		call	@regist_menu$qv
+-		call	@overlay_wipe$qv
+-		les	bx, _resident
+-		cmp	es:[bx+mikoconfig_t.continues_used], 3
+-		jnb	loc_C4F5
+-		mov	al, _rank
+-		cbw
+-		cmp	ax, RANK_EXTRA
+-		jge	loc_C4F5
+-		call	gaiji_putsa pascal, (18 shl 16) + 12, ds, offset gCONTINUE?, TX_WHITE
+-		push	0E500E1h
+-		call	sub_C2F4
+-		call	gaiji_putsa pascal, (18 shl 16) + 20, ds, offset gCREDIT, TX_GREEN
+-		les	bx, _resident
+-		mov	ax, gb_3_
+-		sub	ax, es:[bx+mikoconfig_t.continues_used]
+-		mov	si, ax
+-		call	gaiji_putca pascal, (32 shl 16) + 20, ax, TX_GREEN
+-		mov	di, 1
+-
+-loc_C47A:
+-		call	@input_reset_sense$qv
+-		cmp	[bp+var_2], 0
+-		jnz	short loc_C493
+-		cmp	_key_det, 0
+-		jnz	short loc_C493
+-		mov	[bp+var_2], 1
+-		jmp	short loc_C4A5
+-; ---------------------------------------------------------------------------
+-
+-loc_C493:
+-		cmp	[bp+var_2], 1
+-		jnz	short loc_C4A5
+-		cmp	_key_det, 0
+-		jz	short loc_C4A5
+-		mov	[bp+var_2], 2
+-
+-loc_C4A5:
+-		test	byte ptr _key_det, INPUT_UP
+-		jz	short loc_C4B8
+-		mov	di, 1
+-		push	0E500E1h
+-		call	sub_C2F4
+-
+-loc_C4B8:
+-		test	byte ptr _key_det, INPUT_DOWN
+-		jz	short loc_C4CA
+-		xor	di, di
+-		push	0E100E5h
+-		call	sub_C2F4
+-
+-loc_C4CA:
+-		cmp	[bp+var_2], 2
+-		jnz	short loc_C4E5
+-		test	byte ptr _key_det, INPUT_SHOT
+-		jnz	short loc_C4EE
+-		test	byte ptr _key_det, INPUT_OK
+-		jnz	short loc_C4EE
+-		test	byte ptr _key_det, INPUT_CANCEL
+-		jnz	short loc_C4EE
+-
+-loc_C4E5:
+-		call	@frame_delay$qi pascal, 1
+-		jmp	short loc_C47A
+-; ---------------------------------------------------------------------------
+-
+-loc_C4EE:
+-		test	byte ptr _key_det, INPUT_CANCEL
+-		jz	short loc_C4F7
+-
+-loc_C4F5:
+-		xor	di, di
+-
+-loc_C4F7:
+-		les	bx, _resident
+-		mov	eax, es:[bx+mikoconfig_t.score_highest]
+-		cmp	eax, _score
+-		jnb	short loc_C50D
+-		mov	eax, _score
+-		jmp	short loc_C516
+-; ---------------------------------------------------------------------------
+-
+-loc_C50D:
+-		les	bx, _resident
+-		mov	eax, es:[bx+mikoconfig_t.score_highest]
+-
+-loc_C516:
+-		les	bx, _resident
+-		mov	es:[bx+mikoconfig_t.score_highest], eax
+-		mov	al, es:[bx+mikoconfig_t.start_lives]
+-		mov	_lives, al
+-		mov	al, es:[bx+mikoconfig_t.start_bombs]
+-		mov	_bombs, al
+-		mov	_power, POWER_MIN
+-		inc	es:[bx+mikoconfig_t.continues_used]
+-		call	@score_reset$qv
+-		mov	al, _stage_id
+-		cbw
+-		mov	bx, 5
+-		cwd
+-		idiv	bx
+-		add	dx, 2
+-		mov	_item_bigpower_override, dx
+-		mov	_power_overflow, 10
+-		mov	PaletteTone, 100
+-		call	far ptr	palette_show
+-		call	@overlay_wipe$qv
+-		mov	ax, di
+-		pop	di
+-		pop	si
+-		leave
+-		retn
+-sub_C31F	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @GameExecl$qnxc
+-@GameExecl$qnxc	proc far
+-
+-@@binary_fn		= dword	ptr  6
+-
+-		push	bp
+-		mov	bp, sp
+-		freePISlotLarge	0
+-		call	sub_E24A
+-		call	_mpn_free
+-		call	@stage_data_free$qv
+-		call	super_free
+-		call	graph_clear
+-		call	text_clear
+-		call	@gaiji_free$qv
+-		call	@game_exit$qv
+-		call	_execl c, large [bp+@@binary_fn], large [bp+@@binary_fn], large 0
+-		pop	bp
+-		retf
+-@GameExecl$qnxc	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @sub_C5B0$qv
+-@sub_C5B0$qv	proc near
+-		push	bp
+-		mov	bp, sp
+-		xor	dx, dx
+-		jmp	short loc_C5C2
+-; ---------------------------------------------------------------------------
+-
+-loc_C5B7:
+-		mov	bx, dx
+-		shl	bx, 4
+-		mov	byte ptr [bx+2908h], 0
+-		inc	dx
+-
+-loc_C5C2:
+-		cmp	dx, 26h	; '&'
+-		jl	short loc_C5B7
+-		mov	byte_205DE, 0
+-		mov	_player_invincibility_time, 0
+-		mov	_player_invincible_via_bomb, 0
+-		mov	_quit, 0
+-		mov	_stage_miss_count, 0
+-		mov	_miss_frame, 0
+-		mov	byte_205DF, 8
+-		mov	byte_205E0, 0
+-		mov	_player_is_hit, 0
+-		mov	_miss_active, 0
+-		mov	_player_option_patnum, PAT_OPTION_A
+-		mov	_word_205D8, 0FFFFh
+-		mov	word_205DC, 0FFFFh
+-		mov	_word_205DA, 0FFFFh
+-		mov	_shot_max_spread, 0
+-		mov	byte_20611, 0
+-		les	bx, _resident
+-		mov	al, es:[bx+mikoconfig_t.shottype]
+-		mov	ah, 0
+-		or	ax, ax
+-		jz	short loc_C634
+-		cmp	ax, 1
+-		jz	short loc_C655
+-		cmp	ax, 2
+-		jz	short loc_C67F
+-		pop	bp
+-		retn
+-; ---------------------------------------------------------------------------
+-
+-loc_C634:
+-		mov	_playchar_shot_func, offset shot_a
+-		mov	_playchar_speed_aligned_x, 5
+-		mov	_playchar_speed_aligned_y, 5
+-		mov	_playchar_speed_diagonal_x, 4
+-		mov	_playchar_speed_diagonal_y, 4
+-		mov	_shot_max_param_1, 30h	; '0'
+-		pop	bp
+-		retn
+-; ---------------------------------------------------------------------------
+-
+-loc_C655:
+-		mov	_playchar_shot_func, offset shot_b
+-		mov	_playchar_speed_aligned_x, 4
+-		mov	_playchar_speed_aligned_y, 4
+-		mov	_playchar_speed_diagonal_x, 3
+-		mov	_playchar_speed_diagonal_y, 3
+-		mov	_shot_max_param_1, 34h	; '4'
+-		mov	_shot_max_param_2, 37h	; '7'
+-		inc	_player_option_patnum
+-		pop	bp
+-		retn
+-; ---------------------------------------------------------------------------
+-
+-loc_C67F:
+-		mov	_playchar_shot_func, offset shot_c
+-		mov	_playchar_speed_aligned_x, 3
+-		mov	_playchar_speed_aligned_y, 3
+-		mov	_playchar_speed_diagonal_x, 3
+-		mov	_playchar_speed_diagonal_y, 3
+-		mov	byte_1E518, 3
+-		mov	_shot_max_param_1, 7Dh	; '}'
+-		mov	_shot_max_param_2, 3Bh	; ';'
+-		mov	al, _player_option_patnum
+-		add	al, 2
+-		mov	_player_option_patnum, al
+-		pop	bp
+-		retn
+-@sub_C5B0$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-public @player_invalidate$qv
+-@player_invalidate$qv proc near
+-
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 2
+-		push	si
+-		mov	[bp+var_2], 2
+-		call	sub_D38F
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		add	ax, offset _player_left_on_page
+-		mov	_player_left_on_back_page, ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		add	ax, offset _player_top_on_page
+-		mov	_player_top_on_back_page, ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		add	ax, offset _player_option_left_topleft.x
+-		mov	_player_option_left_left_on_back_, ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		add	ax, offset _player_option_left_topleft.y
+-		mov	_player_option_left_top_on_back_p, ax
+-		mov	bx, _player_left_on_back_page
+-		push	word ptr [bx]	; left
+-		mov	bx, _player_top_on_back_page
+-		push	word ptr [bx]	; top
+-		push	(PLAYER_W shl 16) or PLAYER_H	; (w shl 16) or h
+-		call	@tiles_invalidate_rect$qiiii
+-		mov	bx, _player_option_left_left_on_back_
+-		mov	si, [bx]
+-		push	si	; left
+-		mov	bx, _player_option_left_top_on_back_p
+-		push	word ptr [bx]	; top
+-		push	(PLAYER_OPTION_W shl 16) or PLAYER_OPTION_H	; (w shl 16) or h
+-		call	@tiles_invalidate_rect$qiiii
+-		lea	ax, [si+PLAYER_OPTION_TO_OPTION_DISTANCE]
+-		push	ax	; left
+-		mov	bx, _player_option_left_top_on_back_p
+-		push	word ptr [bx]	; top
+-		push	(PLAYER_OPTION_W shl 16) or PLAYER_OPTION_H	; (w shl 16) or h
+-		call	@tiles_invalidate_rect$qiiii
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _player_left_on_page[bx]
+-		mov	bx, _player_left_on_back_page
+-		mov	[bx], ax
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _player_top_on_page[bx]
+-		mov	bx, _player_top_on_back_page
+-		mov	[bx], ax
+-		pop	si
+-		leave
+-		retn
+-@player_invalidate$qv endp
+-main_01c_TEXT	ends
++MAIN_01C_TEXT	segment	byte public 'CODE' use16
++	extern @cfg_load$qv:near
++	extern @gameover_and_continue_menu$qv:near
++	extern @GameExecl$qnc:proc
++	extern @sub_C5B0$qv:near
++	extern @player_invalidate$qv:near
++MAIN_01C_TEXT	ends
+ 
+ POINTNUM_TEXT	segment	byte public 'CODE' use16
+ 	@pointnums_init_for_rank_and_rese$qv procdesc near
+@@ -1546,7 +1094,8 @@ sub_CAD2	endp
+ 
+ ; Attributes: bp-based frame
+ 
+-shot_a	proc near
++public @shot_a$qv
++@shot_a$qv	proc near
+ 
+ var_2		= word ptr -2
+ 
+@@ -1836,12 +1385,12 @@ loc_CD04:
+ 		jl	loc_CB53
+ 
+ loc_CD0D:
+-		mov	byte_205DE, 0
++		mov	_byte_205DE, 0
+ 		pop	di
+ 		pop	si
+ 		leave
+ 		retn
+-shot_a	endp
++@shot_a$qv	endp
+ 
+ ; ---------------------------------------------------------------------------
+ off_CD16	dw offset loc_CB78
+@@ -1859,7 +1408,8 @@ off_CD16	dw offset loc_CB78
+ 
+ ; Attributes: bp-based frame
+ 
+-shot_b	proc near
++public @shot_b$qv
++@shot_b$qv	proc near
+ 
+ var_3		= byte ptr -3
+ var_2		= word ptr -2
+@@ -2133,15 +1683,15 @@ loc_CEF7:
+ 		cmp	_shot_level, SHOT_LEVEL_MAX
+ 		jnz	short loc_CF0F
+ 		mov	ax, _word_205D8
+-		mov	word_205DC, ax
++		mov	_word_205DC, ax
+ 		jmp	short loc_CF15
+ ; ---------------------------------------------------------------------------
+ 
+ loc_CF0F:
+-		mov	word_205DC, 0FFFFh
++		mov	_word_205DC, 0FFFFh
+ 
+ loc_CF15:
+-		cmp	byte_205DE, 0
++		cmp	_byte_205DE, 0
+ 		jnz	loc_D042
+ 		mov	al, _shot_level
+ 		mov	ah, 0
+@@ -2298,7 +1848,7 @@ loc_D023:
+ loc_D029:
+ 		cmp	si, di
+ 		jnz	short loc_D034
+-		mov	byte_205DE, 1
++		mov	_byte_205DE, 1
+ 		jmp	short loc_D042
+ ; ---------------------------------------------------------------------------
+ 
+@@ -2317,7 +1867,7 @@ loc_D042:
+ 		pop	si
+ 		leave
+ 		retn
+-shot_b	endp
++@shot_b$qv	endp
+ 
+ ; ---------------------------------------------------------------------------
+ 		db 0
+@@ -2344,7 +1894,8 @@ off_D057	dw offset loc_CD81
+ 
+ ; Attributes: bp-based frame
+ 
+-shot_c	proc near
++public @shot_c$qv
++@shot_c$qv	proc near
+ 
+ var_3		= byte ptr -3
+ var_2		= word ptr -2
+@@ -2493,7 +2044,7 @@ loc_D17D:
+ 		jb	loc_D34E
+ 		cmp	_shot_level, 3
+ 		jnb	short loc_D197
+-		cmp	byte_205DE, 0
++		cmp	_byte_205DE, 0
+ 		jz	short loc_D1E3
+ 		jmp	loc_D34E
+ ; ---------------------------------------------------------------------------
+@@ -2754,7 +2305,7 @@ loc_D332:
+ loc_D335:
+ 		cmp	si, di
+ 		jnz	short loc_D340
+-		mov	byte_205DE, 1
++		mov	_byte_205DE, 1
+ 		jmp	short loc_D34E
+ ; ---------------------------------------------------------------------------
+ 
+@@ -2773,7 +2324,7 @@ loc_D34E:
+ 		pop	si
+ 		leave
+ 		retn
+-shot_c	endp
++@shot_c$qv	endp
+ 
+ ; ---------------------------------------------------------------------------
+ off_D352	dw offset loc_D1FB
+@@ -2824,7 +2375,8 @@ sub_D376	endp
+ 
+ ; Attributes: bp-based frame
+ 
+-sub_D38F	proc near
++public @sub_D38F$qv
++@sub_D38F$qv	proc near
+ 
+ var_3		= byte ptr -3
+ @@left		= word ptr -2
+@@ -2937,14 +2489,14 @@ loc_D472:
+ 		jl	loc_D3A3
+ 		cmp	[bp+var_3], 0
+ 		jnz	short loc_D484
+-		mov	byte_205DE, 0
++		mov	_byte_205DE, 0
+ 
+ loc_D484:
+ 		pop	di
+ 		pop	si
+ 		leave
+ 		retn
+-sub_D38F	endp
++@sub_D38F$qv	endp
+ 
+ 
+ ; =============== S U B	R O U T	I N E =======================================
+@@ -3093,7 +2645,7 @@ loc_D59F:
+ loc_D5B0:
+ 		cmp	byte ptr [si+1], 1
+ 		jbe	short loc_D5ED
+-		mov	al, byte_1E518
++		mov	al, _byte_1E518
+ 		cbw
+ 		movsx	ebx, ax
+ 		mov	eax, _stage_frame
+@@ -3250,7 +2802,8 @@ sub_E178	endp
+ 
+ ; Attributes: bp-based frame
+ 
+-sub_E24A	proc near
++public @sub_E24A$qv
++@sub_E24A$qv	proc near
+ 		push	bp
+ 		mov	bp, sp
+ 		freePISlotLarge	1
+@@ -3263,7 +2816,7 @@ sub_E24A	proc near
+ loc_E26F:
+ 		pop	bp
+ 		retn
+-sub_E24A	endp
++@sub_E24A$qv	endp
+ 
+ 
+ ; =============== S U B	R O U T	I N E =======================================
+@@ -14536,7 +14089,7 @@ public @sigma_end$qv
+ 		add	eax, edx
+ 		mov	es:[bx+mikoconfig_t.score], eax
+ 		call	@scoredat_extra_clear_save$qv
+-		call	@GameExecl$qnxc c, offset aMaine, ds	; "maine"
++		call	@GameExecl$qnc c, offset aMaine, ds	; "maine"
+ 		pop	bp
+ 		retf
+ @sigma_end$qv	endp
+@@ -16711,7 +16264,7 @@ loc_19C4A:
+ 		mov	al, _bombs
+ 		mov	es:[bx+mikoconfig_t.rem_bombs], al
+ 		call	@skill_calculate$qv
+-		call	@GameExecl$qnxc c, offset aMaine_0, ds	; "maine"
++		call	@GameExecl$qnc c, offset aMaine_0, ds	; "maine"
+ 		pop	bp
+ 		retn
+ mima_19C1D	endp
+@@ -18394,7 +17947,8 @@ include th02/snd/se[data].asm
+ public _rank, _stage_id
+ _rank	db RANK_NORMAL
+ _stage_id	db 0
+-aHuuma_cfg	db 'huuma.cfg',0
++public _aHuuma_cfg
++_aHuuma_cfg	db 'huuma.cfg',0
+ include th02/sprites/pellet.asp
+ public _gBONUS_0, _gBONUS_1
+ _gBONUS_0	db 0ABh, 0B8h, 0B6h, 0BEh, 0BCh, 0
+@@ -18421,7 +17975,8 @@ _BONUS_EXTRA_LIVES       	db '
+ _BONUS_EXTRA_BOMBS       	db 'ボム回数',0
+ _BONUS_EXTRA_SIGMA_FRAMES	db 'クリアタイム',0
+ include th02/gaiji/gameover[data].asm
+-asc_1E47E	db '                ',0
++public _asc_1E47E
++_asc_1E47E	db '                ',0
+ 		db 0
+ public _FOUR_DIGIT_POWERS_OF_10
+ _FOUR_DIGIT_POWERS_OF_10 dw 1000, 100, 10, 1
+@@ -18454,7 +18009,8 @@ _player_patnum	dw PAT_PLAYCHAR_STILL
+ public _power, _miss_active
+ _power	db 1
+ _miss_active	db 0
+-byte_1E518	db 4
++public _byte_1E518
++_byte_1E518	db 4
+ public _shot_param_1
+ _shot_param_1	db 40h
+ public _shot_param_2
+@@ -19252,15 +18808,21 @@ _tile_row_scrolled	dw ?
+ byte_2034E	db ?
+ 		db ?
+ byte_20350	db ?
+-		db 647 dup(?)
++		db 39 dup(?)
++public _shots
++_shots	db 608 dup(?)
+ public _word_205D8
+ _word_205D8	dw ?
+ public _word_205DA
+ _word_205DA	dw ?
+-word_205DC	dw ?
+-byte_205DE	db ?
+-byte_205DF	db ?
+-byte_205E0	db ?
++public _word_205DC
++_word_205DC	dw ?
++public _byte_205DE
++_byte_205DE	db ?
++public _byte_205DF
++_byte_205DF	db ?
++public _byte_205E0
++_byte_205E0	db ?
+ 		db ?
+ word_205E2	dw ?
+ word_205E4	dw ?
+@@ -19293,7 +18855,8 @@ public _shot_max_param_2
+ _shot_max_param_2	db ?
+ public _shot_max_spread
+ _shot_max_spread	db ?
+-byte_20611	db ?
++public _byte_20611
++_byte_20611	db ?
+ public _stage_frame
+ _stage_frame	dd ?
+ public _midboss_tile_row

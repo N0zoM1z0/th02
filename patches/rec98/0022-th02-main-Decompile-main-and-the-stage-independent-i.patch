@@ -1,0 +1,506 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 21:05:13 +0100
+Subject: [PATCH] [th02/main] Decompile main() and the stage-independent
+ initialization
+
+The three C++ units after main() now share ZUN's single main_01_TEXT
+segment. TLINK then emits the original `NOP; PUSH CS; CALL near` for far
+calls within that segment by itself, as seen for demo_load(), GameExecl()
+and DemoPlay(). Calls to segments that ReC98 still keeps separate retain
+the inline-asm stand-in.
+---
+ th02/main_01a.cpp | 119 ++++++++++++++++++++-
+ th02/main_01b.cpp |   4 +-
+ th02/main_01c.cpp |   2 +-
+ th02_main.asm     | 256 +++++-----------------------------------------
+ 4 files changed, 145 insertions(+), 236 deletions(-)
+
+diff --git a/th02/main_01a.cpp b/th02/main_01a.cpp
+index 701badb2..f240cf50 100644
+--- a/th02/main_01a.cpp
++++ b/th02/main_01a.cpp
+@@ -4,7 +4,7 @@
+  * translation unit of code segment #1 decompiled after main()
+  */
+ 
+-#pragma option -zPmain_01
++#pragma option -zCmain_01_TEXT -zPmain_01
+ 
+ #include <mem.h>
+ #include "platform.h"
+@@ -35,6 +35,11 @@
+ #include "th02/main/stage/stage.hpp"
+ #include "th02/main/tile/tile.hpp"
+ #include "th02/main/midboss/midboss.hpp"
++#include "th01/rank.h"
++#include "th02/core/globals.hpp"
++#include "th02/core/zunerror.h"
++#include "th02/gaiji/loadfree.h"
++#include "th02/main/playperf.hpp"
+ 
+ static const unsigned char CONTINUE_INVINCIBILITY_FRAMES = 200;
+ 
+@@ -113,6 +118,118 @@ void stage_data_load(void);
+ void near sub_C5B0(void);
+ extern "C" void pascal near text_wipe(void);
+ 
++extern intfunc_t farfp_1F4A4;
++extern const unsigned char gEXTRA_STAGE[];
++extern const unsigned char gDEMO_PLAY[];
++extern char aOp[];
++extern const char aHuuma_efc[];
++extern const char aEye_pi[];
++extern const char aMiko_bft[];
++extern const char aMiko32_bft[];
++extern const char aMiko16_bft[];
++
++int near cfg_load(void);
++void hiscore_init(void);
++void near sub_E178(void);
++extern input_t *DemoBuf;
++int game_init_main(void);
++void demo_load(void);
++int stage_loop(void);
++int near gameover_and_continue_menu(void);
++int GameExecl(char *binary_fn);
++void near main_init(void);
++void near stage_init(void);
++void near stage_continue_reset(void);
++
++int main(void)
++{
++	if(!cfg_load()) {
++		return 1;
++	}
++	if(game_init_main()) {
++		zun_error(ERROR_OUT_OF_MEMORY);
++		return 1;
++	}
++	if(resident->bgm_mode == SND_BGM_FM) {
++		snd_pmd_resident();
++		snd_midi_active = false;
++		snd_determine_mode();
++	} else if(resident->bgm_mode == SND_BGM_MIDI) {
++		snd_pmd_resident();
++		snd_mmd_resident();
++		snd_midi_active = snd_midi_possible;
++		snd_determine_mode();
++	}
++	if(resident->demo_num != 0) {
++		demo_load();
++	}
++	main_init();
++
++next_stage:
++	random_seed = resident->frame;
++	stage_init();
++	asm { nop; push cs; call near ptr overlay_stage_enter_animate; }
++	if(resident->demo_num == 0) {
++		if(stage_id == 5) {
++			gaiji_putsa(16, 12, gEXTRA_STAGE, TX_YELLOW);
++		} else {
++			gaiji_putsa((28 - stage1_gaiji_halflen), 12, gStage1, TX_YELLOW);
++		}
++		text_putsa((28 - stage_title_halflen), 13, stage_title, TX_WHITE);
++	} else {
++		gaiji_putsa(18, 12, gDEMO_PLAY, (TX_YELLOW | TX_BLINK));
++	}
++	key_det = 0;
++	while(1) {
++		if(farfp_1F4A4()) {
++			snd_kaja_func(KAJA_SONG_FADE, 40);
++			goto next_stage;
++		}
++		if(resident->demo_num == 0) {
++			if(gameover_and_continue_menu()) {
++				stage_continue_reset();
++				continue;
++			}
++			resident->stage = stage_id;
++		} else {
++			HMem<input_t>::free(DemoBuf);
++		}
++		break;
++	}
++	PaletteTone = 0;
++	palette_show();
++	GameExecl(aOp);
++	return 0;
++}
++
++void near main_init(void)
++{
++	int i;
++
++	snd_load(aHuuma_efc, SND_LOAD_SE);
++	hiscore_init();
++	pi_load(0, aEye_pi);
++	super_entry_bfnt(aMiko_bft);
++	super_entry_bfnt(aMiko32_bft);
++	super_entry_bfnt(aMiko16_bft);
++	for(i = 48; i < 128; i++) {
++		super_convert_tiny(i);
++	}
++	gaiji_load();
++	sub_E178();
++	reduce_effects = resident->reduce_effects;
++	farfp_1F4A4 = stage_loop;
++	if(resident->continues_used != 0) {
++		score = (resident->continues_used >= 9) ? 9 : resident->continues_used;
++		item_bigpower_override = ((stage_id % 5) + 2);
++	}
++	if(rank == RANK_EASY) {
++		playperf_max = 4;
++	} else {
++		playperf_max = 16;
++	}
++}
++
+ void pascal near stage_fn_set_ext(char far *fn, const char far *ext)
+ {
+ 	fn[7] = ext[0];
+diff --git a/th02/main_01b.cpp b/th02/main_01b.cpp
+index a209f95c..9ef0089f 100644
+--- a/th02/main_01b.cpp
++++ b/th02/main_01b.cpp
+@@ -4,7 +4,7 @@
+  * #1
+  */
+ 
+-#pragma option -zPmain_01 -G
++#pragma option -zCmain_01_TEXT -zPmain_01 -G
+ 
+ #include "platform.h"
+ #include "x86real.h"
+@@ -143,7 +143,7 @@ int stage_loop(void)
+ 		scroll_line_on_page.v[page_back] = scroll_line;
+ 		input_reset_sense();
+ 		if(resident->demo_num != 0) {
+-			asm { nop; push cs; call near ptr DemoPlay; }
++			DemoPlay();
+ 		}
+ 		player_controls_update();
+ 		bomb_update_and_render();
+diff --git a/th02/main_01c.cpp b/th02/main_01c.cpp
+index d8d11754..fbf69377 100644
+--- a/th02/main_01c.cpp
++++ b/th02/main_01c.cpp
+@@ -4,7 +4,7 @@
+  * and player initialization of TH02's MAIN.EXE, at the end of code segment #1
+  */
+ 
+-#pragma option -zPmain_01
++#pragma option -zCmain_01_TEXT -zPmain_01
+ 
+ #include <stddef.h>
+ #include <process.h>
+diff --git a/th02_main.asm b/th02_main.asm
+index 21602efe..f134b54c 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -696,226 +696,8 @@ main_01_TEXT	segment	word public 'CODE' use16
+ ; Attributes: bp-based frame
+ 
+ ; int __cdecl main(int _argc, const char **_argv, const	char **_envp)
+-public _main
+-_main		proc far
+-
+-_argc		= word ptr  6
+-_argv		= dword	ptr  8
+-_envp		= dword	ptr  0Ch
+-
+-		push	bp
+-		mov	bp, sp
+-		call	@cfg_load$qv
+-		or	ax, ax
+-		jz	short @@cfg_load_is_1
+-		call	@game_init_main$qv
+-		or	ax, ax
+-		jz	short @@game_init_main_is_0
+-		call	@zun_error$q11zun_error_t pascal, 3
+-
+-@@cfg_load_is_1:
+-		mov	ax, 1
+-		pop	bp
+-		retf
+-; ---------------------------------------------------------------------------
+-
+-@@game_init_main_is_0:
+-		les	bx, _resident
+-		cmp	es:[bx+mikoconfig_t.bgm_mode], 1
+-		jnz	short loc_B19A
+-		call	_snd_pmd_resident
+-		mov	_snd_midi_active, 0
+-		jmp	short loc_B1B5
+-; ---------------------------------------------------------------------------
+-
+-loc_B19A:
+-		les	bx, _resident
+-		cmp	es:[bx+mikoconfig_t.bgm_mode], 2
+-		jnz	short loc_B1BA
+-		call	_snd_pmd_resident
+-		call	_snd_mmd_resident
+-		mov	al, _snd_midi_possible
+-		mov	_snd_midi_active, al
+-
+-loc_B1B5:
+-		call	_snd_determine_mode
+-
+-loc_B1BA:
+-		les	bx, _resident
+-		cmp	es:[bx+mikoconfig_t.demo_num], 0
+-		jz	short loc_B1CA
+-		nopcall	@demo_load$qv
+-
+-loc_B1CA:
+-		call	sub_B2AB
+-
+-loc_B1CD:
+-		les	bx, _resident
+-		mov	eax, es:[bx+mikoconfig_t.frame]
+-		mov	random_seed, eax
+-		call	@stage_init$qv
+-		nopcall	@overlay_stage_enter_animate$qv
+-		les	bx, _resident
+-		cmp	es:[bx+mikoconfig_t.demo_num], 0
+-		jnz	short loc_B237
+-		mov	al, _stage_id
+-		cbw
+-		cmp	ax, 5
+-		jnz	short loc_B202
+-		push	(16 shl 16) + 12
+-		push	ds
+-		push	offset gEXTRA_STAGE
+-		jmp	short loc_B213
+-; ---------------------------------------------------------------------------
+-
+-loc_B202:
+-		mov	al, _stage1_gaiji_halflen
+-		mov	ah, 0
+-		mov	dx, 1Ch
+-		sub	dx, ax
+-		push	dx
+-		push	12
+-		push	ds
+-		push	offset _gStage1
+-
+-loc_B213:
+-		push	TX_YELLOW
+-		call	gaiji_putsa
+-		mov	al, _stage_title_halflen
+-		mov	ah, 0
+-		mov	dx, 1Ch
+-		sub	dx, ax
+-		call	text_putsa pascal, dx, 13, ds, _stage_title, TX_WHITE
+-		jmp	short loc_B249
+-; ---------------------------------------------------------------------------
+-
+-loc_B237:
+-		call	gaiji_putsa pascal, (18 shl 16) + 12, ds, offset gDEMO_PLAY, TX_YELLOW + TX_BLINK
+-
+-loc_B249:
+-		mov	_key_det, 0
+-
+-loc_B24F:
+-		call	farfp_1F4A4
+-		or	ax, ax
+-		jz	short loc_B263
+-		kajacall	KAJA_SONG_FADE, 40
+-		pop	cx
+-		jmp	loc_B1CD
+-; ---------------------------------------------------------------------------
+-
+-loc_B263:
+-		les	bx, _resident
+-		cmp	es:[bx+mikoconfig_t.demo_num], 0
+-		jnz	short loc_B287
+-		call	@gameover_and_continue_menu$qv
+-		or	ax, ax
+-		jz	short loc_B27A
+-		call	@stage_continue_reset$qv
+-		jmp	short loc_B24F
+-; ---------------------------------------------------------------------------
+-
+-loc_B27A:
+-		les	bx, _resident
+-		mov	al, _stage_id
+-		mov	es:[bx+mikoconfig_t.stage], al
+-		jmp	short loc_B290
+-; ---------------------------------------------------------------------------
+-
+-loc_B287:
+-		push	word ptr _DemoBuf+2
+-		call	hmem_free
+-
+-loc_B290:
+-		mov	PaletteTone, 0
+-		call	far ptr	palette_show
+-		push	ds
+-		push	offset arg0	; "op"
+-		nopcall	@GameExecl$qnc
+-		add	sp, 4
+-		xor	ax, ax
+-		pop	bp
+-		retf
+-_main		endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sub_B2AB	proc near
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		call	_snd_load stdcall, offset aHuuma_efc, ds, SND_LOAD_SE
+-		call	@hiscore_init$qv
+-		call	@pi_load$qinxc stdcall, 0, offset aEye_pi, ds
+-		add	sp, 0Ch
+-		call	super_entry_bfnt pascal, ds, offset aMiko_bft ; "miko.bft"
+-		call	super_entry_bfnt pascal, ds, offset aMiko32_bft ; "miko32.bft"
+-		call	super_entry_bfnt pascal, ds, offset aMiko16_bft ; "miko16.bft"
+-		mov	si, 48
+-		jmp	short loc_B2F5
+-; ---------------------------------------------------------------------------
+-
+-loc_B2EE:
+-		call	super_convert_tiny pascal, si
+-		inc	si
+-
+-loc_B2F5:
+-		cmp	si, 128
+-		jl	short loc_B2EE
+-		call	@gaiji_load$qv
+-		call	sub_E178
+-		les	bx, _resident
+-		mov	al, es:[bx+mikoconfig_t.reduce_effects]
+-		mov	_reduce_effects, al
+-		setfarfp	farfp_1F4A4, @stage_loop$qv
+-		cmp	es:[bx+mikoconfig_t.continues_used], 0
+-		jz	short loc_B34C
+-		cmp	es:[bx+mikoconfig_t.continues_used], 9
+-		jb	short loc_B32B
+-		mov	ax, 9
+-		jmp	short loc_B333
+-; ---------------------------------------------------------------------------
+-
+-loc_B32B:
+-		les	bx, _resident
+-		mov	ax, es:[bx+mikoconfig_t.continues_used]
+-
+-loc_B333:
+-		movzx	eax, ax
+-		mov	_score, eax
+-		mov	al, _stage_id
+-		cbw
+-		mov	bx, 5
+-		cwd
+-		idiv	bx
+-		add	dx, 2
+-		mov	_item_bigpower_override, dx
+-
+-loc_B34C:
+-		cmp	_rank, RANK_EASY
+-		jnz	short loc_B35A
+-		mov	_playperf_max, 4
+-		jmp	short loc_B35F
+-; ---------------------------------------------------------------------------
+-
+-loc_B35A:
+-		mov	_playperf_max, 16
+-
+-loc_B35F:
+-		pop	si
+-		pop	bp
+-		retn
+-sub_B2AB	endp
+-
+-
+-
+-
+-
+-
+-
++	extern _main:proc
++	extern @main_init$qv:near
+ main_01_TEXT	ends
+ 
+ MAIN_01A_TEXT	segment	byte public 'CODE' use16
+@@ -2733,7 +2515,8 @@ main_01___TEXT	segment	byte public 'CODE' use16
+ 
+ ; Attributes: bp-based frame
+ 
+-sub_E178	proc near
++public @sub_E178$qv
++@sub_E178$qv	proc near
+ 		push	bp
+ 		mov	bp, sp
+ 		push	ds
+@@ -2795,7 +2578,7 @@ loc_E1F3:
+ loc_E248:
+ 		pop	bp
+ 		retn
+-sub_E178	endp
++@sub_E178$qv	endp
+ 
+ 
+ ; =============== S U B	R O U T	I N E =======================================
+@@ -17784,7 +17567,8 @@ main_06_TEXT	ends
+ public _gStage1
+ _gStage1		db 0BCh, 0BDh, 0AAh, 0B0h, 0AEh, 0A1h, 0, 0
+ 		db 0, 0, 0, 0, 0, 0, 0, 0
+-gEXTRA_STAGE	db 0AEh, 0C1h, 0BDh, 0BBh, 0AAh, 0CFh, 0CFh, 0BCh, 0BDh
++public _gEXTRA_STAGE
++_gEXTRA_STAGE	db 0AEh, 0C1h, 0BDh, 0BBh, 0AAh, 0CFh, 0CFh, 0BCh, 0BDh
+ 		db	0AAh, 0B0h, 0AEh, 0, 0, 0, 0
+ public _BGM_TITLES, _STAGE_TITLES, _STAGE_TITLE_HALFLENGTHS
+ _BGM_TITLES	label word
+@@ -17814,7 +17598,8 @@ _STAGE_TITLE_HALFLENGTHS	label byte
+ 		db  0Ch
+ 		db  0Dh
+ 		db  0Dh
+-gDEMO_PLAY	db 0ADh, 0AEh, 0B7h, 0B8h, 0CFh, 0B9h, 0B5h, 0AAh, 0C2h, 0
++public _gDEMO_PLAY
++_gDEMO_PLAY	db 0ADh, 0AEh, 0B7h, 0B8h, 0CFh, 0B9h, 0B5h, 0AAh, 0C2h, 0
+ public _gPAUSE_MENU
+ _gPAUSE_MENU	db 0B9h, 0AAh, 0BEh, 0BCh, 0AEh, 0CFh, 0B7h, 0AEh, 0B6h, 0BEh, 0
+ public _g11SPACES
+@@ -17859,13 +17644,19 @@ aSTAGE3_TITLE	db '
+ aSTAGE4_TITLE	db 'óÏñÇÅ@Å`Revengeful Ghost',0
+ aSTAGE5_TITLE	db 'ïïñÇÅ@Å`ìåï˚ïïñÇò^ and ...',0
+ aEXTRA_TITLE		db 'àŸãÛÅ@Å`for Lunatic Gamers',0
+-; char arg0[3]
+-arg0		db 'op',0
+-aHuuma_efc	db 'huuma.efc',0
+-aEye_pi		db 'EYE.PI',0
+-aMiko_bft	db 'miko.bft',0
+-aMiko32_bft	db 'miko32.bft',0
+-aMiko16_bft	db 'miko16.bft',0
++; char _aOp[3]
++public _aOp
++_aOp		db 'op',0
++public _aHuuma_efc
++_aHuuma_efc	db 'huuma.efc',0
++public _aEye_pi
++_aEye_pi		db 'EYE.PI',0
++public _aMiko_bft
++_aMiko_bft	db 'miko.bft',0
++public _aMiko32_bft
++_aMiko32_bft	db 'miko32.bft',0
++public _aMiko16_bft
++_aMiko16_bft	db 'miko16.bft',0
+ public _aBmt
+ _aBmt		db 'bmt',0
+ public _aBbt
+@@ -18720,7 +18511,8 @@ public _boss_bg_render_func
+ _boss_bg_render_func	dd ?
+ public _farfp_1F4A0
+ _farfp_1F4A0	dd ?
+-farfp_1F4A4	dd ?
++public _farfp_1F4A4
++_farfp_1F4A4	dd ?
+ include th02/main/demo[bss].asm
+ public _playperf_max
+ _playperf_max	db ?
