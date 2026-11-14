@@ -59,8 +59,9 @@ bytes naturally; patching `db` bytes into the ASM would not be natural source.
 The four alignment-fill rows are fixed by `db 0` before the `GRCG_CIRCLE_X`
 and `SUPER_PUT` includes and by inlining `vs[data].asm` with its original
 `90h` fill (TH02 files only; the include is shared with TH03–TH05). OP.EXE and
-MAINE.EXE program images are now byte-identical. In MAIN only the 13 inline-asm
-bytes of `sub_B3DA`/`sub_BCB1` remain.
+MAINE.EXE program images are now byte-identical. The 13 inline-asm bytes in
+MAIN went away once `sub_B3DA` (stage init) and `sub_BCB1` (stage loop) were
+decompiled with ZUN's inline `asm`; all three program images now match.
 
 One more ReC98 prototype inaccuracy surfaced while decompiling callers:
 `bullets_add_16x16()` takes `patnum` as `int`, not the byte-sized
