@@ -1,0 +1,1483 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 20:26:00 +0100
+Subject: [PATCH] [th02/main] Marisa: decompile six bit attack patterns
+
+---
+ th02/main/boss/marisa.cpp | 394 +++++++++++++++-
+ th02_main.asm             | 958 ++------------------------------------
+ 2 files changed, 420 insertions(+), 932 deletions(-)
+
+diff --git a/th02/main/boss/marisa.cpp b/th02/main/boss/marisa.cpp
+index c3cb5db2..3524d2c2 100644
+--- a/th02/main/boss/marisa.cpp
++++ b/th02/main/boss/marisa.cpp
+@@ -15,6 +15,14 @@
+ #include "th02/main/stage/stage.hpp"
+ #include "th02/main/hud/overlay.hpp"
+ #include "th02/main/dialog/dialog.hpp"
++#include "th02/main/bullet/bullet.hpp"
++#include "th02/main/player/player.hpp"
++#include "th02/core/globals.hpp"
++#include "th02/snd/snd.h"
++#include "th02/sprites/main_pat.h"
++#include "th02/sprites/bullet16.h"
++#include "th01/math/subpixel.hpp"
++#include "th01/rank.h"
+ 
+ void near dialog_pre(void);
+ 
+@@ -27,6 +35,18 @@ extern int16_t marisa_bit_state[BIT_COUNT];
+ extern int16_t marisa_bit_hit_this_frame[BIT_COUNT];
+ extern screen_x_t far *marisa_bit_left_on_back_page[BIT_COUNT];
+ extern screen_y_t far *marisa_bit_top_on_back_page[BIT_COUNT];
++extern int16_t marisa_bit_radius[BIT_COUNT];
++extern int16_t marisa_bit_speed[BIT_COUNT];
++extern uint8_t marisa_bit_angle[BIT_COUNT];
++extern uint8_t marisa_bit_spin[BIT_COUNT];
++extern uint8_t angle_26D87;
++extern uint8_t angle_26D88;
++extern uint8_t byte_26D89;
++extern int16_t word_26D8E;
++extern int16_t word_26D90;
++extern int8_t byte_1EEA5;
++extern uint8_t byte_20671;
++extern int16_t patnum_2064E;
+ 
+ extern int16_t word_205D8;
+ extern int16_t word_205DA;
+@@ -59,12 +79,374 @@ void near marisa_1B35F(void);
+ void near marisa_1B3DE(void);
+ void near marisa_1B477(void);
+ void near marisa_1B555(void);
+-void near marisa_1B6DA(void);
+-void near marisa_1B7D3(void);
+-void near marisa_1B996(void);
+-void near marisa_1BAFF(void);
+-void near marisa_1BC43(void);
+-void near marisa_1BE72(void);
++void pascal near marisa_1B665(int frames);
++
++#define marisa_bit_speed_set(v0_and_2, v1_and_3) { \
++	marisa_bit_speed[0] = v0_and_2; \
++	marisa_bit_speed[2] = v0_and_2; \
++	marisa_bit_speed[1] = v1_and_3; \
++	marisa_bit_speed[3] = v1_and_3; \
++}
++
++void near marisa_1B6DA(void)
++{
++	register int i;
++
++	if(boss_phase_frame < 50) {
++		return;
++	}
++	if(boss_phase_frame < 280) {
++		for(i = 0; i < BIT_COUNT; i++) {
++			marisa_bit_radius[i]++;
++		}
++	} else if(boss_phase_frame < 510) {
++		for(i = 0; i < BIT_COUNT; i++) {
++			marisa_bit_radius[i]--;
++		}
++	} else {
++		boss_phase_frame = 0;
++		patnum_2064E = 128;
++	}
++	marisa_1B665(220);
++	if(boss_phase_frame == 220) {
++		angle_26D87 = 0;
++	}
++	if(marisa_bit_state_sum == 8) {
++		patnum_2064E = 130;
++	}
++	if(
++		((boss_phase_frame >= 250) && (boss_phase_frame < 270)) ||
++		(marisa_bit_state_sum == 8)
++	) {
++		if(marisa_bit_state_sum != 8) {
++			angle_26D87 += 0x0D;
++			if(rank >= (boss_phase_frame & 1)) {
++				bullets_add_pellet(
++					(marisa_topleft.x + 44),
++					(marisa_topleft.y + 64),
++					angle_26D87,
++					BG_1,
++					to_sp(3.125f)
++				);
++			}
++		} else {
++			angle_26D87 += 0x0A;
++			bullets_add_pellet(
++				(marisa_topleft.x + 64),
++				(marisa_topleft.y + 16),
++				angle_26D87,
++				BG_1,
++				to_sp(3.75f)
++			);
++			if(boss_phase_frame > 270) {
++				boss_phase_frame = 0;
++				patnum_2064E = 128;
++			}
++		}
++	}
++}
++
++void near marisa_1B7D3(void)
++{
++	screen_y_t top;
++	register int i;
++	register screen_x_t left;
++
++	if(boss_phase_frame == 10) {
++		marisa_bit_speed_set(3, -2);
++	}
++	if(boss_phase_frame < 50) {
++		return;
++	}
++	if(boss_phase_frame < 130) {
++		for(i = 0; i < BIT_COUNT; i += 2) {
++			marisa_bit_radius[i] += 2;
++		}
++	} else if(boss_phase_frame < 260) {
++	} else if(boss_phase_frame < 340) {
++		for(i = 0; i < BIT_COUNT; i += 2) {
++			marisa_bit_radius[i] -= 2;
++		}
++		if(rank != RANK_EASY) {
++			for(i = 1; i < BIT_COUNT; i += 2) {
++				marisa_bit_radius[i]++;
++			}
++		}
++	} else if(boss_phase_frame < 420) {
++		if(rank != RANK_EASY) {
++			for(i = 1; i < BIT_COUNT; i += 2) {
++				marisa_bit_radius[i]--;
++			}
++		}
++	} else {
++		marisa_bit_speed_set(2, -2);
++		boss_phase_frame = 0;
++		patnum_2064E = 128;
++	}
++	marisa_1B665(140);
++	if(boss_phase_frame == 140) {
++		angle_26D88 = 0;
++	}
++	if(marisa_bit_state_sum == 8) {
++		patnum_2064E = 130;
++		angle_26D88 -= (0x18 - rank);
++		bullets_add_16x16(
++			(marisa_topleft.x + 64),
++			(marisa_topleft.y + 16),
++			angle_26D88,
++			BSM_1,
++			PAT_BULLET16_STAR,
++			to_sp(3.75f)
++		);
++	} else if(
++		(boss_phase_frame >= 150) &&
++		(boss_phase_frame < 250) &&
++		((boss_phase_frame & 3) == 0)
++	) {
++		angle_26D88 += 3;
++		snd_se_play(10);
++		for(i = 0; i < BIT_COUNT; i += 2) {
++			if(marisa_bit_state[i] == 0) {
++				left = *marisa_bit_left_on_back_page[i];
++				top = *marisa_bit_top_on_back_page[i];
++				if((left > 0) && (left < 0x1A0) && (top >= 0) && (top <= 0x170)) {
++					bullets_add_pellet(
++						(left + 12),
++						(top + 12),
++						(marisa_bit_angle[i] + angle_26D88),
++						BG_1,
++						to_sp(4.375f)
++					);
++				}
++			}
++		}
++	}
++}
++
++void near marisa_1B996(void)
++{
++	screen_y_t top;
++	int angle;
++	register int i;
++	register screen_x_t left;
++
++	if(boss_phase_frame == 10) {
++		marisa_bit_speed_set(-3, -3);
++	}
++	if(marisa_bit_state_sum == 8) {
++		patnum_2064E = 128;
++		boss_phase_frame = 0;
++	}
++	if(boss_phase_frame < 50) {
++		return;
++	}
++	if(boss_phase_frame == 50) {
++		marisa_bit_speed_set(-4, -4);
++		snd_se_play(9);
++		patnum_2064E = 130;
++	} else if(boss_phase_frame == 100) {
++		snd_se_play(3);
++		for(i = 0; i < BIT_COUNT; i++) {
++			if(marisa_bit_state[i] == 0) {
++				left = (*marisa_bit_left_on_back_page[i] + 12);
++				top = (*marisa_bit_top_on_back_page[i] + 12);
++				for(angle = -0x40; angle < 0x40; angle += 0x10) {
++					bullets_add_pellet(
++						left,
++						top,
++						(marisa_bit_angle[i] + angle),
++						BG_1,
++						to_sp(4.375f)
++					);
++				}
++			}
++		}
++	} else if(boss_phase_frame == 110) {
++		snd_se_play(3);
++		for(i = 0; i < BIT_COUNT; i++) {
++			if(marisa_bit_state[i] == 0) {
++				left = (*marisa_bit_left_on_back_page[i] + 12);
++				top = (*marisa_bit_top_on_back_page[i] + 12);
++				for(angle = -0x46; angle < 0x46; angle += 0x0C) {
++					bullets_add_pellet(
++						left,
++						top,
++						(marisa_bit_angle[i] + angle),
++						BG_1,
++						(randring2_next8_and(0x1F) + to_sp(1.0f))
++					);
++				}
++				marisa_bit_state[i] = 1;
++			}
++		}
++	}
++}
++
++void near marisa_1BAFF(void)
++{
++	screen_y_t top;
++	subpixel_t speed;
++	register int i;
++	register screen_x_t left;
++
++	if(boss_phase_frame < 50) {
++		return;
++	}
++	if(boss_phase_frame >= 150) {
++		marisa_1B665(120);
++	}
++	if(boss_phase_frame == 50) {
++		snd_se_play(9);
++		patnum_2064E = 130;
++		byte_26D89 = 0;
++		marisa_bit_spin[0] = 0;
++		marisa_bit_spin[1] = 0;
++		marisa_bit_spin[2] = 0;
++		marisa_bit_spin[3] = 0;
++	} else if(boss_phase_frame == 300) {
++		boss_phase_frame = 0;
++		marisa_bit_speed[0] *= -1;
++		marisa_bit_speed[1] *= -1;
++		marisa_bit_speed[2] *= -1;
++		marisa_bit_speed[3] *= -1;
++	}
++	if((boss_phase_frame > 70) && ((boss_phase_frame % 5) == 0)) {
++		snd_se_play(10);
++		for(i = 0; i < BIT_COUNT; i++) {
++			if(marisa_bit_state[i] == 0) {
++				left = (*marisa_bit_left_on_back_page[i] + 12);
++				top = (*marisa_bit_top_on_back_page[i] + 12);
++				speed = ((boss_phase_frame >> 2) + to_sp(1.5625f));
++				bullets_add_pellet(
++					left,
++					top,
++					(marisa_bit_angle[i] + marisa_bit_spin[i]),
++					BG_1,
++					speed
++				);
++				marisa_bit_spin[i] += (marisa_bit_speed[i] * 2);
++			}
++		}
++		if((marisa_bit_state_sum == 8) && ((byte_26D89 & 1) == 0)) {
++			bullets_add_pellet(
++				(marisa_topleft.x + 44),
++				(marisa_topleft.y + 44),
++				boss_phase_frame,
++				BG_16_RING,
++				to_sp(3.125f)
++			);
++		}
++		byte_26D89++;
++	}
++}
++
++#define marisa_star_add(left, top, angle, group) { \
++	bullets_add_16x16( \
++		left, top, angle, group, PAT_BULLET16_STAR, to_sp(4.375f) \
++	); \
++}
++
++void near marisa_1BC43(void)
++{
++	int i;
++	unsigned char angle;
++	register screen_x_t edge_left;
++
++	if(boss_phase_frame < 50) {
++		return;
++	}
++	if(boss_phase_frame >= 150) {
++		marisa_1B665(120);
++	}
++	if(boss_phase_frame == 50) {
++		snd_se_play(9);
++		patnum_2064E = 130;
++		bullet_special.u1.drift_angle = byte_1EEA5;
++		bullet_special.u2.drift_speed.v = 0;
++		bullet_special.u3.drift_frames = 64;
++		byte_1EEA5 *= -1;
++		marisa_bit_speed_set(2, -2);
++	} else if(boss_phase_frame == 70) {
++		marisa_bit_speed_set(3, -3);
++	} else if(boss_phase_frame == 80) {
++		marisa_bit_speed_set(4, -4);
++	} else if(boss_phase_frame == 200) {
++		marisa_bit_speed_set(2, -2);
++		boss_phase_frame = 0;
++	}
++	if((boss_phase_frame > 70) && ((boss_phase_frame % 14) == 0)) {
++		snd_se_play(10);
++		if(boss_phase_frame <= 120) {
++			for(i = 0; i < BIT_COUNT; i++) {
++				if(marisa_bit_state[i] == 0) {
++					marisa_star_add(
++						(*marisa_bit_left_on_back_page[i] + 8),
++						(*marisa_bit_top_on_back_page[i] + 8),
++						-0x40,
++						BSM_1
++					);
++				}
++			}
++			marisa_star_add(
++				(marisa_topleft.x + 40), (marisa_topleft.y + 40), -0x40, BSM_1
++			);
++		} else {
++			if(byte_1EEA5 == 1) {
++				edge_left = 0x190;
++			} else {
++				edge_left = 0x20;
++			}
++			for(i = 0; byte_20671 > i; i++) {
++				angle = (randring2_next8_and(7) + (byte_1EEA5 << 4) + 0x40);
++				bullets_add_16x16(
++					((randring2_next16() % (PLAYFIELD_W - BULLET16_W)) + PLAYFIELD_LEFT),
++					PLAYFIELD_TOP,
++					angle,
++					BSM_1,
++					PAT_BULLET16_STAR,
++					(randring2_next8_and(0x1F) + to_sp(1.0f))
++				);
++				bullets_add_16x16(
++					edge_left,
++					((randring2_next16() % 320) + PLAYFIELD_TOP),
++					angle,
++					BSM_1,
++					PAT_BULLET16_STAR,
++					(randring2_next8_and(0x1F) + to_sp(1.0f))
++				);
++			}
++		}
++		if(marisa_bit_state_sum == 8) {
++			for(i = 0; i < BIT_COUNT; i++) {
++				marisa_star_add(
++					(marisa_topleft.x + 40),
++					(marisa_topleft.y + 40),
++					((i << 6) + (boss_phase_frame * 2)),
++					BSM_DRIFT_ANGLE_CHASE
++				);
++			}
++		}
++	}
++}
++
++void near marisa_1BE72(void)
++{
++	if(boss_phase_frame == 1) {
++		return;
++	}
++	if(boss_phase_frame == 2) {
++		word_26D8E = ((marisa_topleft.x + 32) < player_topleft.x) ? 1 : -1;
++		word_26D90 = (marisa_topleft.y < 72) ? 1
++			: (marisa_topleft.y > 108) ? -1
++			: (1 - (randring2_next8() % 3));
++	}
++	if(boss_phase_frame < 50) {
++		*boss_left_on_back_page += word_26D8E;
++		*boss_top_on_back_page += word_26D90;
++		marisa_topleft.x = *boss_left_on_back_page;
++		marisa_topleft.y = *boss_top_on_back_page;
++	}
++}
+ 
+ int marisa_update(void)
+ {
+diff --git a/th02_main.asm b/th02_main.asm
+index c59987d2..18973d26 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -19704,15 +19704,15 @@ loc_1B3E7:
+ 		add	bx, bx
+ 		cmp	word ptr _marisa_bit_state[bx], 0
+ 		jnz	short loc_1B46C
+-		mov	al, [si-6D20h]
++		mov	al, _marisa_bit_angle[si]
+ 		mov	bx, si
+ 		add	bx, bx
+-		add	al, [bx-6D2Eh]
+-		mov	[si-6D20h], al
++		add	al, byte ptr _marisa_bit_speed[bx]
++		mov	_marisa_bit_angle[si], al
+ 		mov	bx, si
+ 		add	bx, bx
+-		movsx	eax, word ptr [bx-6D36h]
+-		mov	dl, [si-6D20h]
++		movsx	eax, word ptr _marisa_bit_radius[bx]
++		mov	dl, _marisa_bit_angle[si]
+ 		mov	dh, 0
+ 		add	dx, dx
+ 		mov	bx, dx
+@@ -19727,8 +19727,8 @@ loc_1B3E7:
+ 		mov	es:[bx], ax
+ 		mov	bx, si
+ 		add	bx, bx
+-		movsx	eax, word ptr [bx-6D36h]
+-		mov	dl, [si-6D20h]
++		movsx	eax, word ptr _marisa_bit_radius[bx]
++		mov	dl, _marisa_bit_angle[si]
+ 		mov	dh, 0
+ 		add	dx, dx
+ 		mov	bx, dx
+@@ -19799,10 +19799,10 @@ loc_1B4C1:
+ 		shl	al, 6
+ 		mov	[bx-6D20h], al
+ 		add	bx, bx
+-		mov	word ptr [bx-6D36h], 8
++		mov	word ptr _marisa_bit_radius[bx], 8
+ 		mov	bx, [bp+var_2]
+ 		add	bx, bx
+-		mov	word ptr [bx-6D2Eh], 2
++		mov	word ptr _marisa_bit_speed[bx], 2
+ 		mov	bx, [bp+var_2]
+ 		add	bx, bx
+ 		mov	_marisa_bit_left[bx], si
+@@ -19839,7 +19839,7 @@ loc_1B52F:
+ loc_1B53E:
+ 		mov	bx, [bp+var_2]
+ 		add	bx, bx
+-		add	word ptr [bx-6D36h], 2
++		add	word ptr _marisa_bit_radius[bx], 2
+ 		inc	[bp+var_2]
+ 
+ loc_1B54B:
+@@ -19974,7 +19974,8 @@ loc_1B662:
+ 
+ ; Attributes: bp-based frame
+ 
+-marisa_1B665	proc near
++public @MARISA_1B665$QI
++@MARISA_1B665$QI	proc near
+ 
+ @@frame	= word ptr  4
+ 
+@@ -20030,925 +20031,19 @@ loc_1B6D5:
+ 		pop	si
+ 		pop	bp
+ 		retn	2
+-marisa_1B665	endp
++@MARISA_1B665$QI	endp
+ 
+ 
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @marisa_1B6DA$qv
+-@marisa_1B6DA$qv	proc near
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		cmp	_boss_phase_frame, 50
+-		jl	loc_1B7D0
+-		cmp	_boss_phase_frame, 280
+-		jge	short loc_1B703
+-		xor	si, si
+-		jmp	short loc_1B6FC
+-; ---------------------------------------------------------------------------
+-
+-loc_1B6F3:
+-		mov	bx, si
+-		add	bx, bx
+-		inc	word ptr [bx-6D36h]
+-		inc	si
+-
+-loc_1B6FC:
+-		cmp	si, 4
+-		jl	short loc_1B6F3
+-		jmp	short loc_1B72B
+-; ---------------------------------------------------------------------------
+-
+-loc_1B703:
+-		cmp	_boss_phase_frame, 510
+-		jge	short loc_1B71F
+-		xor	si, si
+-		jmp	short loc_1B718
+-; ---------------------------------------------------------------------------
+-
+-loc_1B70F:
+-		mov	bx, si
+-		add	bx, bx
+-		dec	word ptr [bx-6D36h]
+-		inc	si
+-
+-loc_1B718:
+-		cmp	si, 4
+-		jl	short loc_1B70F
+-		jmp	short loc_1B72B
+-; ---------------------------------------------------------------------------
+-
+-loc_1B71F:
+-		mov	_boss_phase_frame, 0
+-		mov	_patnum_2064E, 128
+-
+-loc_1B72B:
+-		push	0DCh
+-		call	marisa_1B665
+-		cmp	_boss_phase_frame, 220
+-		jnz	short loc_1B73E
+-		mov	angle_26D87, 0
+-
+-loc_1B73E:
+-		cmp	_marisa_bit_state_sum, 8
+-		jnz	short loc_1B74B
+-		mov	_patnum_2064E, 130
+-
+-loc_1B74B:
+-		cmp	_boss_phase_frame, 250
+-		jl	short loc_1B75B
+-		cmp	_boss_phase_frame, 270
+-		jl	short loc_1B762
+-
+-loc_1B75B:
+-		cmp	_marisa_bit_state_sum, 8
+-		jnz	short loc_1B7D0
+-
+-loc_1B762:
+-		cmp	_marisa_bit_state_sum, 8
+-		jz	short loc_1B79B
+-		mov	al, angle_26D87
+-		add	al, 0Dh
+-		mov	angle_26D87, al
+-		mov	al, _rank
+-		cbw
+-		mov	dx, _boss_phase_frame
+-		and	dx, 1
+-		cmp	ax, dx
+-		jl	short loc_1B7D0
+-		mov	ax, _marisa_topleft.x
+-		add	ax, 44
+-		push	ax	; left
+-		mov	ax, _marisa_topleft.y
+-		add	ax, 64
+-		push	ax	; top
+-		push	word ptr angle_26D87	; angle
+-		push	BG_1	; group
+-		push	((3 shl 4) + 2)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-		jmp	short loc_1B7D0
+-; ---------------------------------------------------------------------------
+-
+-loc_1B79B:
+-		mov	al, angle_26D87
+-		add	al, 0Ah
+-		mov	angle_26D87, al
+-		mov	ax, _marisa_topleft.x
+-		add	ax, 64
+-		push	ax	; left
+-		mov	ax, _marisa_topleft.y
+-		add	ax, 16
+-		push	ax	; top
+-		push	word ptr angle_26D87	; angle
+-		push	BG_1	; group
+-		push	((3 shl 4) + 12)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-		cmp	_boss_phase_frame, 270
+-		jle	short loc_1B7D0
+-		mov	_boss_phase_frame, 0
+-		mov	_patnum_2064E, 128
+-
+-loc_1B7D0:
+-		pop	si
+-		pop	bp
+-		retn
+-@marisa_1B6DA$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @marisa_1B7D3$qv
+-@marisa_1B7D3$qv	proc near
+-
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 2
+-		push	si
+-		push	di
+-		cmp	_boss_phase_frame, 10
+-		jnz	short loc_1B7FA
+-		mov	word_26D42, 3
+-		mov	word_26D46, 3
+-		mov	word_26D44, 0FFFEh
+-		mov	word_26D48, 0FFFEh
+-
+-loc_1B7FA:
+-		cmp	_boss_phase_frame, 50
+-		jl	loc_1B992
+-		cmp	_boss_phase_frame, 130
+-		jge	short loc_1B823
+-		xor	si, si
+-		jmp	short loc_1B81B
+-; ---------------------------------------------------------------------------
+-
+-loc_1B80F:
+-		mov	bx, si
+-		add	bx, bx
+-		add	word ptr [bx-6D36h], 2
+-		add	si, 2
+-
+-loc_1B81B:
+-		cmp	si, 4
+-		jl	short loc_1B80F
+-		jmp	loc_1B8B2
+-; ---------------------------------------------------------------------------
+-
+-loc_1B823:
+-		cmp	_boss_phase_frame, 260
+-		jl	loc_1B8B2
+-		cmp	_boss_phase_frame, 340
+-		jge	short loc_1B868
+-		xor	si, si
+-		jmp	short loc_1B845
+-; ---------------------------------------------------------------------------
+-
+-loc_1B839:
+-		mov	bx, si
+-		add	bx, bx
+-		sub	word ptr [bx-6D36h], 2
+-		add	si, 2
+-
+-loc_1B845:
+-		cmp	si, 4
+-		jl	short loc_1B839
+-		cmp	_rank, RANK_EASY
+-		jz	short loc_1B8B2
+-		mov	si, 1
+-		jmp	short loc_1B861
+-; ---------------------------------------------------------------------------
+-
+-loc_1B856:
+-		mov	bx, si
+-		add	bx, bx
+-		inc	word ptr [bx-6D36h]
+-		add	si, 2
+-
+-loc_1B861:
+-		cmp	si, 4
+-		jl	short loc_1B856
+-		jmp	short loc_1B8B2
+-; ---------------------------------------------------------------------------
+-
+-loc_1B868:
+-		cmp	_boss_phase_frame, 420
+-		jge	short loc_1B88E
+-		cmp	_rank, RANK_EASY
+-		jz	short loc_1B8B2
+-		mov	si, 1
+-		jmp	short loc_1B887
+-; ---------------------------------------------------------------------------
+-
+-loc_1B87C:
+-		mov	bx, si
+-		add	bx, bx
+-		dec	word ptr [bx-6D36h]
+-		add	si, 2
+-
+-loc_1B887:
+-		cmp	si, 4
+-		jl	short loc_1B87C
+-		jmp	short loc_1B8B2
+-; ---------------------------------------------------------------------------
+-
+-loc_1B88E:
+-		mov	word_26D42, 2
+-		mov	word_26D46, 2
+-		mov	word_26D44, 0FFFEh
+-		mov	word_26D48, 0FFFEh
+-		mov	_boss_phase_frame, 0
+-		mov	_patnum_2064E, 128
+-
+-loc_1B8B2:
+-		push	8Ch
+-		call	marisa_1B665
+-		cmp	_boss_phase_frame, 140
+-		jnz	short loc_1B8C5
+-		mov	angle_26D88, 0
+-
+-loc_1B8C5:
+-		cmp	_marisa_bit_state_sum, 8
+-		jnz	short loc_1B903
+-		mov	_patnum_2064E, 130
+-		mov	al, 18h
+-		sub	al, _rank
+-		mov	dl, angle_26D88
+-		sub	dl, al
+-		mov	angle_26D88, dl
+-		mov	ax, _marisa_topleft.x
+-		add	ax, 64
+-		push	ax	; left
+-		mov	ax, _marisa_topleft.y
+-		add	ax, 16
+-		push	ax	; top
+-		push	word ptr angle_26D88	; angle
+-		push	BSM_1	; group
+-		push	(PAT_BULLET16_STAR shl 16) or ((3 shl 4) + 12)	; (patnum shl 16) or speed
+-		call	@bullets_add_16x16$qiiuc32bullet_group_or_special_motion_tii
+-		jmp	loc_1B992
+-; ---------------------------------------------------------------------------
+-
+-loc_1B903:
+-		cmp	_boss_phase_frame, 150
+-		jl	loc_1B992
+-		cmp	_boss_phase_frame, 250
+-		jge	short loc_1B992
+-		test	byte ptr _boss_phase_frame, 3
+-		jnz	short loc_1B992
+-		mov	al, angle_26D88
+-		add	al, 3
+-		mov	angle_26D88, al
+-		call	_snd_se_play c, 10
+-		xor	si, si
+-		jmp	short loc_1B98D
+-; ---------------------------------------------------------------------------
+-
+-loc_1B932:
+-		mov	bx, si
+-		add	bx, bx
+-		cmp	word ptr _marisa_bit_state[bx], 0
+-		jnz	short loc_1B98A
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _marisa_bit_left_on_back_page[bx]
+-		mov	di, es:[bx]
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _marisa_bit_top_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		mov	[bp+var_2], ax
+-		or	di, di
+-		jle	short loc_1B98A
+-		cmp	di, 1A0h
+-		jge	short loc_1B98A
+-		cmp	[bp+var_2], 0
+-		jl	short loc_1B98A
+-		cmp	[bp+var_2], 170h
+-		jg	short loc_1B98A
+-		lea	ax, [di+0Ch]
+-		push	ax	; left
+-		mov	ax, [bp+var_2]
+-		add	ax, 12
+-		push	ax	; top
+-		mov	al, [si-6D20h]
+-		add	al, angle_26D88
+-		push	ax	; angle
+-		push	BG_1	; group
+-		push	((4 shl 4) + 6)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-
+-loc_1B98A:
+-		add	si, 2
+-
+-loc_1B98D:
+-		cmp	si, 4
+-		jl	short loc_1B932
+-
+-loc_1B992:
+-		pop	di
+-		pop	si
+-		leave
+-		retn
+-@marisa_1B7D3$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @marisa_1B996$qv
+-@marisa_1B996$qv	proc near
+-
+-@@angle = word ptr -4
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		push	si
+-		push	di
+-		cmp	_boss_phase_frame, 10
+-		jnz	short loc_1B9BD
+-		mov	word_26D42, 0FFFDh
+-		mov	word_26D46, 0FFFDh
+-		mov	word_26D44, 0FFFDh
+-		mov	word_26D48, 0FFFDh
+-
+-loc_1B9BD:
+-		cmp	_marisa_bit_state_sum, 8
+-		jnz	short loc_1B9D0
+-		mov	_patnum_2064E, 128
+-		mov	_boss_phase_frame, 0
+-
+-loc_1B9D0:
+-		cmp	_boss_phase_frame, 50
+-		jl	loc_1BAFB
+-		cmp	_boss_phase_frame, 50
+-		jnz	short loc_1BA0B
+-		mov	word_26D42, 0FFFCh
+-		mov	word_26D46, 0FFFCh
+-		mov	word_26D44, 0FFFCh
+-		mov	word_26D48, 0FFFCh
+-		call	_snd_se_play c, 9
+-		mov	_patnum_2064E, 130
+-		jmp	loc_1BAFB
+-; ---------------------------------------------------------------------------
+-
+-loc_1BA0B:
+-		cmp	_boss_phase_frame, 100
+-		jnz	short loc_1BA7B
+-		call	_snd_se_play c, 3
+-		xor	si, si
+-		jmp	short loc_1BA73
+-; ---------------------------------------------------------------------------
+-
+-loc_1BA20:
+-		mov	bx, si
+-		add	bx, bx
+-		cmp	word ptr _marisa_bit_state[bx], 0
+-		jnz	short loc_1BA72
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _marisa_bit_left_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 0Ch
+-		mov	di, ax
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _marisa_bit_top_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 12
+-		mov	[bp+var_2], ax
+-		mov	[bp+@@angle], -40h
+-		jmp	short loc_1BA6C
+-; ---------------------------------------------------------------------------
+-
+-loc_1BA55:
+-		push	di	; left
+-		push	[bp+var_2]	; top
+-		mov	al, [si-6D20h]
+-		add	al, byte ptr [bp+@@angle]
+-		push	ax	; angle
+-		push	BG_1	; group
+-		push	((4 shl 4) + 6)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-		add	[bp+@@angle], 10h
+-
+-loc_1BA6C:
+-		cmp	[bp+@@angle], 40h
+-		jl	short loc_1BA55
+-
+-loc_1BA72:
+-		inc	si
+-
+-loc_1BA73:
+-		cmp	si, 4
+-		jl	short loc_1BA20
+-		jmp	loc_1BAFB
+-; ---------------------------------------------------------------------------
+-
+-loc_1BA7B:
+-		cmp	_boss_phase_frame, 110
+-		jnz	short loc_1BAFB
+-		call	_snd_se_play c, 3
+-		xor	si, si
+-		jmp	short loc_1BAF6
+-; ---------------------------------------------------------------------------
+-
+-loc_1BA90:
+-		mov	bx, si
+-		add	bx, bx
+-		cmp	word ptr _marisa_bit_state[bx], 0
+-		jnz	short loc_1BAF5
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _marisa_bit_left_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 0Ch
+-		mov	di, ax
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _marisa_bit_top_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 0Ch
+-		mov	[bp+var_2], ax
+-		mov	[bp+var_4], 0FFBAh
+-		jmp	short loc_1BAE5
+-; ---------------------------------------------------------------------------
+-
+-loc_1BAC5:
+-		push	di	; left
+-		push	[bp+var_2]	; top
+-		mov	al, [si-6D20h]
+-		add	al, byte ptr [bp+var_4]
+-		push	ax	; angle
+-		push	BG_1	; group
+-		call	@randring2_next8_and$quc pascal, 1Fh
+-		mov	ah, 0
+-		add	ax, (1 shl 4)
+-		push	ax	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-		add	[bp+var_4], 0Ch
+-
+-loc_1BAE5:
+-		cmp	[bp+var_4], 46h	; 'F'
+-		jl	short loc_1BAC5
+-		mov	bx, si
+-		add	bx, bx
+-		mov	word ptr _marisa_bit_state[bx], 1
+-
+-loc_1BAF5:
+-		inc	si
+-
+-loc_1BAF6:
+-		cmp	si, 4
+-		jl	short loc_1BA90
+-
+-loc_1BAFB:
+-		pop	di
+-		pop	si
+-		leave
+-		retn
+-@marisa_1B996$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @marisa_1BAFF$qv
+-@marisa_1BAFF$qv	proc near
+-
+-@@speed		= word ptr -4
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		push	si
+-		push	di
+-		cmp	_boss_phase_frame, 50
+-		jl	loc_1BC3F
+-		cmp	_boss_phase_frame, 150
+-		jl	short loc_1BB1D
+-		push	78h ; 'x'
+-		call	marisa_1B665
+-
+-loc_1BB1D:
+-		cmp	_boss_phase_frame, 50
+-		jnz	short loc_1BB4F
+-		call	_snd_se_play c, 9
+-		mov	_patnum_2064E, 130
+-		mov	byte_26D89, 0
+-		mov	byte_26D8A, 0
+-		mov	byte_26D8B, 0
+-		mov	byte_26D8C, 0
+-		mov	byte_26D8D, 0
+-		jmp	short loc_1BB85
+-; ---------------------------------------------------------------------------
+-
+-loc_1BB4F:
+-		cmp	_boss_phase_frame, 300
+-		jnz	short loc_1BB85
+-		mov	_boss_phase_frame, 0
+-		mov	ax, -1
+-		imul	word_26D42
+-		mov	word_26D42, ax
+-		mov	ax, -1
+-		imul	word_26D44
+-		mov	word_26D44, ax
+-		mov	ax, -1
+-		imul	word_26D46
+-		mov	word_26D46, ax
+-		mov	ax, -1
+-		imul	word_26D48
+-		mov	word_26D48, ax
+-
+-loc_1BB85:
+-		cmp	_boss_phase_frame, 70
+-		jle	loc_1BC3F
+-		mov	ax, _boss_phase_frame
+-		mov	bx, 5
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jnz	loc_1BC3F
+-		call	_snd_se_play c, 10
+-		xor	si, si
+-		jmp	short loc_1BC0F
+-; ---------------------------------------------------------------------------
+-
+-loc_1BBAB:
+-		mov	bx, si
+-		add	bx, bx
+-		cmp	word ptr _marisa_bit_state[bx], 0
+-		jnz	short loc_1BC0E
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _marisa_bit_left_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 0Ch
+-		mov	di, ax
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _marisa_bit_top_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 0Ch
+-		mov	[bp+var_2], ax
+-		mov	ax, _boss_phase_frame
+-		sar	ax, 2
+-		add	ax, ((1 shl 4) + 9)
+-		mov	[bp+@@speed], ax
+-		push	di	; left
+-		push	[bp+var_2]	; top
+-		mov	al, [si-6D20h]
+-		add	al, [si-6CE6h]
+-		push	ax	; angle
+-		push	BG_1	; group
+-		push	[bp+@@speed]	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-		mov	al, [si-6CE6h]
+-		mov	bx, si
+-		add	bx, bx
+-		mov	dl, [bx-6D2Eh]
+-		add	dl, dl
+-		add	al, dl
+-		mov	[si-6CE6h], al
+-
+-loc_1BC0E:
+-		inc	si
+-
+-loc_1BC0F:
+-		cmp	si, 4
+-		jl	short loc_1BBAB
+-		cmp	_marisa_bit_state_sum, 8
+-		jnz	short loc_1BC3B
+-		test	byte_26D89, 1
+-		jnz	short loc_1BC3B
+-		mov	ax, _marisa_topleft.x
+-		add	ax, 44
+-		push	ax	; left
+-		mov	ax, _marisa_topleft.y
+-		add	ax, 44
+-		push	ax	; top
+-		push	_boss_phase_frame	; angle
+-		push	BG_16_RING	; group
+-		push	((3 shl 4) + 2)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-
+-loc_1BC3B:
+-		inc	byte_26D89
+-
+-loc_1BC3F:
+-		pop	di
+-		pop	si
+-		leave
+-		retn
+-@marisa_1BAFF$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @marisa_1BC43$qv
+-@marisa_1BC43$qv	proc near
+-
+-@@angle	= byte ptr -3
+-var_2	= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		push	si
+-		cmp	_boss_phase_frame, 50
+-		jl	loc_1BE6F
+-		cmp	_boss_phase_frame, 150
+-		jl	short loc_1BC60
+-		push	78h ; 'x'
+-		call	marisa_1B665
+-
+-loc_1BC60:
+-		cmp	_boss_phase_frame, 50
+-		jnz	short loc_1BCAE
+-		call	_snd_se_play c, 9
+-		mov	_patnum_2064E, 130
+-		mov	al, byte_1EEA5
+-		cbw
+-		mov	bullet_special_drift_angle, ax
+-		mov	bullet_special_drift_speed, 0
+-		mov	bullet_special_drift_frames, 64
+-		mov	al, byte_1EEA5
+-		cbw
+-		imul	ax, -1
+-		mov	byte_1EEA5, al
+-		mov	word_26D42, 2
+-		mov	word_26D46, 2
+-		mov	word_26D44, 0FFFEh
+-		mov	word_26D48, 0FFFEh
+-		jmp	short loc_1BD16
+-; ---------------------------------------------------------------------------
+-
+-loc_1BCAE:
+-		cmp	_boss_phase_frame, 70
+-		jnz	short loc_1BCCF
+-		mov	word_26D42, 3
+-		mov	word_26D46, 3
+-		mov	word_26D44, 0FFFDh
+-		mov	word_26D48, 0FFFDh
+-		jmp	short loc_1BD16
+-; ---------------------------------------------------------------------------
+-
+-loc_1BCCF:
+-		cmp	_boss_phase_frame, 80
+-		jnz	short loc_1BCF0
+-		mov	word_26D42, 4
+-		mov	word_26D46, 4
+-		mov	word_26D44, 0FFFCh
+-		mov	word_26D48, 0FFFCh
+-		jmp	short loc_1BD16
+-; ---------------------------------------------------------------------------
+-
+-loc_1BCF0:
+-		cmp	_boss_phase_frame, 200
+-		jnz	short loc_1BD16
+-		mov	word_26D42, 2
+-		mov	word_26D46, 2
+-		mov	word_26D44, 0FFFEh
+-		mov	word_26D48, 0FFFEh
+-		mov	_boss_phase_frame, 0
+-
+-loc_1BD16:
+-		cmp	_boss_phase_frame, 70
+-		jle	loc_1BE6F
+-		mov	ax, _boss_phase_frame
+-		mov	bx, 14
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jnz	loc_1BE6F
+-		call	_snd_se_play c, 10
+-		cmp	_boss_phase_frame, 120
+-		jg	short loc_1BDAC
+-		mov	[bp+var_2], 0
+-		jmp	short loc_1BD86
+-; ---------------------------------------------------------------------------
+-
+-loc_1BD46:
+-		mov	bx, [bp+var_2]
+-		add	bx, bx
+-		cmp	word ptr _marisa_bit_state[bx], 0
+-		jnz	short loc_1BD83
+-		mov	bx, [bp+var_2]
+-		shl	bx, 2
+-		les	bx, _marisa_bit_left_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 8
+-		push	ax	; left
+-		mov	bx, [bp+var_2]
+-		shl	bx, 2
+-		les	bx, _marisa_bit_top_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 8
+-		push	ax	; top
+-		push	(-40h and 0FFh)	; angle
+-		push	BSM_1	; group
+-		push	(PAT_BULLET16_STAR shl 16) or ((4 shl 4) + 6)	; (patnum shl 16) or speed
+-		call	@bullets_add_16x16$qiiuc32bullet_group_or_special_motion_tii
+-
+-loc_1BD83:
+-		inc	[bp+var_2]
+-
+-loc_1BD86:
+-		cmp	[bp+var_2], 4
+-		jl	short loc_1BD46
+-		mov	ax, _marisa_topleft.x
+-		add	ax, 40
+-		push	ax	; left
+-		mov	ax, _marisa_topleft.y
+-		add	ax, 40
+-		push	ax	; top
+-		push	(-40h and 0FFh)	; angle
+-		push	BSM_1	; group
+-		push	(PAT_BULLET16_STAR shl 16) or ((4 shl 4) + 6)	; (patnum shl 16) or speed
+-		call	@bullets_add_16x16$qiiuc32bullet_group_or_special_motion_tii
+-		jmp	loc_1BE2F
+-; ---------------------------------------------------------------------------
+-
+-loc_1BDAC:
+-		mov	al, byte_1EEA5
+-		cbw
+-		cmp	ax, 1
+-		jnz	short loc_1BDBA
+-		mov	si, 190h
+-		jmp	short loc_1BDBD
+-; ---------------------------------------------------------------------------
+-
+-loc_1BDBA:
+-		mov	si, 20h	; ' '
+-
+-loc_1BDBD:
+-		mov	[bp+var_2], 0
+-		jmp	short loc_1BE25
+-; ---------------------------------------------------------------------------
+-
+-loc_1BDC4:
+-		call	@randring2_next8_and$quc pascal, 7
+-		mov	dl, byte_1EEA5
+-		shl	dl, 4
+-		add	al, dl
+-		add	al, 40h
+-		mov	[bp+@@angle], al
+-		call	@randring2_next16$qv
+-		mov	bx, (PLAYFIELD_W - BULLET16_W)
+-		xor	dx, dx
+-		div	bx
+-		add	dx, PLAYFIELD_LEFT
+-		push	dx	; left
+-		push	PLAYFIELD_TOP	; top
+-		push	word ptr [bp+@@angle]	; angle
+-		push	BSM_1	; group
+-		push	PAT_BULLET16_STAR	; patnum
+-		call	@randring2_next8_and$quc pascal, 1Fh
+-		mov	ah, 0
+-		add	ax, 10h
+-		push	ax	; speed
+-		call	@bullets_add_16x16$qiiuc32bullet_group_or_special_motion_tii
+-		push	si	; left
+-		call	@randring2_next16$qv
+-		mov	bx, 320
+-		xor	dx, dx
+-		div	bx
+-		add	dx, PLAYFIELD_TOP
+-		push	dx	; top
+-		push	word ptr [bp+@@angle]	; angle
+-		push	BSM_1	; group
+-		push	PAT_BULLET16_STAR	; patnum
+-		call	@randring2_next8_and$quc pascal, 1Fh
+-		mov	ah, 0
+-		add	ax, 10h
+-		push	ax	; speed
+-		call	@bullets_add_16x16$qiiuc32bullet_group_or_special_motion_tii
+-		inc	[bp+var_2]
+ 
+-loc_1BE25:
+-		mov	al, _byte_20671
+-		mov	ah, 0
+-		cmp	ax, [bp+var_2]
+-		jg	short loc_1BDC4
+-
+-loc_1BE2F:
+-		cmp	_marisa_bit_state_sum, 8
+-		jnz	short loc_1BE6F
+-		mov	[bp+var_2], 0
+-		jmp	short loc_1BE69
+-; ---------------------------------------------------------------------------
+-
+-loc_1BE3D:
+-		mov	ax, _marisa_topleft.x
+-		add	ax, 40
+-		push	ax	; left
+-		mov	ax, _marisa_topleft.y
+-		add	ax, 40
+-		push	ax	; top
+-		mov	al, byte ptr [bp+var_2]
+-		shl	al, 6
+-		mov	dl, byte ptr _boss_phase_frame
+-		add	dl, dl
+-		add	al, dl
+-		push	ax	; angle
+-		push	BSM_DRIFT_ANGLE_CHASE	; group
+-		push	(PAT_BULLET16_STAR shl 16) or ((4 shl 4) + 6)	; (patnum shl 16) or speed
+-		call	@bullets_add_16x16$qiiuc32bullet_group_or_special_motion_tii
+-		inc	[bp+var_2]
+-
+-loc_1BE69:
+-		cmp	[bp+var_2], 4
+-		jl	short loc_1BE3D
+-
+-loc_1BE6F:
+-		pop	si
+-		leave
+-		retn
+-@marisa_1BC43$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+ 
+-; Attributes: bp-based frame
+ 
+-public @marisa_1BE72$qv
+-@marisa_1BE72$qv	proc near
+-		push	bp
+-		mov	bp, sp
+-		cmp	_boss_phase_frame, 1
+-		jz	short loc_1BEF0
+-		cmp	_boss_phase_frame, 2
+-		jnz	short loc_1BEC5
+-		mov	ax, _marisa_topleft.x
+-		add	ax, 32
+-		cmp	ax, _player_topleft.x
+-		jge	short loc_1BE94
+-		mov	ax, 1
+-		jmp	short loc_1BE97
+-; ---------------------------------------------------------------------------
+ 
+-loc_1BE94:
+-		mov	ax, 0FFFFh
+ 
+-loc_1BE97:
+-		mov	word_26D8E, ax
+-		cmp	_marisa_topleft.y, 72
+-		jge	short loc_1BEA6
+-		mov	ax, 1
+-		jmp	short loc_1BEC2
+-; ---------------------------------------------------------------------------
+ 
+-loc_1BEA6:
+-		cmp	_marisa_topleft.y, 108
+-		jle	short loc_1BEB2
+-		mov	ax, 0FFFFh
+-		jmp	short loc_1BEC2
+-; ---------------------------------------------------------------------------
+ 
+-loc_1BEB2:
+-		call	@randring2_next8$qv
+-		mov	ah, 0
+-		mov	bx, 3
+-		cwd
+-		idiv	bx
+-		mov	ax, 1
+-		sub	ax, dx
+ 
+-loc_1BEC2:
+-		mov	word_26D90, ax
+ 
+-loc_1BEC5:
+-		cmp	_boss_phase_frame, 50
+-		jge	short loc_1BEF0
+-		mov	bx, _boss_left_on_back_page
+-		mov	ax, word_26D8E
+-		add	[bx], ax
+-		mov	bx, _boss_top_on_back_page
+-		mov	ax, word_26D90
+-		add	[bx], ax
+-		mov	bx, _boss_left_on_back_page
+-		mov	ax, [bx]
+-		mov	_marisa_topleft.x, ax
+-		mov	bx, _boss_top_on_back_page
+-		mov	ax, [bx]
+-		mov	_marisa_topleft.y, ax
+ 
+-loc_1BEF0:
+-		pop	bp
+-		retn
+-@marisa_1BE72$qv	endp
+ 
+ 
+ 
+@@ -22182,7 +21277,8 @@ word_1EE9A	dw 0
+ 		db    0
+ 		db    0
+ byte_1EEA4	db 2
+-byte_1EEA5	db 1
++public _byte_1EEA5
++_byte_1EEA5	db 1
+ aMima_bft_0	db 'mima.bft',0
+ aStage3_b_bft	db 'stage3_b.bft',0
+ aStage3_b_btt_0	db 'stage3_b.btt',0
+@@ -22885,7 +21981,9 @@ _marisa_bit_top	dw (2 * 4) dup(?)
+ _marisa_bit_hits	dw 4 dup(?)
+ _marisa_bit_state	dw 4 dup(?)
+ _marisa_bit_hit_this_frame	dw 4 dup(?)
+-		dw 4 dup(?)
++public _marisa_bit_radius, _marisa_bit_speed
++_marisa_bit_radius	dw 4 dup(?)
++_marisa_bit_speed label word
+ word_26D42	dw ?
+ word_26D44	dw ?
+ word_26D46	dw ?
+@@ -22900,7 +21998,8 @@ public _marisa_pattern_cycle
+ _marisa_pattern_cycle	db ?
+ public _marisa_bit_patterns_seen
+ _marisa_bit_patterns_seen	db ?
+-		db 4 dup(?)
++public _marisa_bit_angle
++_marisa_bit_angle	db 4 dup(?)
+ word_26D54	dw ?
+ public _marisa_bit_left_on_back_page, _marisa_bit_top_on_back_page
+ _marisa_bit_left_on_back_page	dd 4 dup(?)
+@@ -22917,15 +22016,22 @@ byte_26D81	db ?
+ word_26D82	dw ?
+ word_26D84	dw ?
+ angle_26D86	db ?
+-angle_26D87	db ?
+-angle_26D88	db ?
+-byte_26D89	db ?
++public _angle_26D87
++_angle_26D87	db ?
++public _angle_26D88
++_angle_26D88	db ?
++public _byte_26D89
++_byte_26D89	db ?
++public _marisa_bit_spin
++_marisa_bit_spin label byte
+ byte_26D8A	db ?
+ byte_26D8B	db ?
+ byte_26D8C	db ?
+ byte_26D8D	db ?
+-word_26D8E	dw ?
+-word_26D90	dw ?
++public _word_26D8E
++_word_26D8E	dw ?
++public _word_26D90
++_word_26D90	dw ?
+ public _marisa_pattern_rounds
+ _marisa_pattern_rounds	db ?
+ 		db    ?	;

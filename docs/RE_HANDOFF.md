@@ -16,6 +16,13 @@ Decompiled beyond ReC98 so far (all byte-exact):
   MAIN_01_TEXT continues in ASM segment `main_01c_TEXT`.
 - BOSS_5_TEXT: the complete Mima (stage 5 boss) block, 23 functions
   (`th02/main/boss/b4.cpp`, TU `th02/boss_4.cpp`).
+- MAIN_03__TEXT tail: Marisa (stage 4 boss) from `marisa_1B19D` through
+  `marisa_end`, 30 functions (`th02/main/boss/marisa.cpp`, TU
+  `th02/marisa.cpp`, `-zCMAIN_03__TEXT -G -a2`). Still ASM before it:
+  `marisa_init` (blocked by a `nopcall` with arguments), `marisa_1AA60`,
+  `1AB35`, `1AC7B`, `1AD80`, `1AE98`, `1B025`. Keep the TU start at an odd
+  address (now `0x1B19D`) or the `-a2` switch-table pad in `marisa_update()`
+  moves; `1AB35` and `1AC7B` are the next odd starting points.
 - MAIN_04 circle helpers (`th02/main_04.cpp`), MAIN_06 score savers
   (`regist_m.cpp`).
 
@@ -64,6 +71,9 @@ disassembly; `th02_asmedit.py` removes/exports procedures and data labels.
   `test mem`; `++x & 3` goes through AL.
 - `(y << 6) + (y << 4)` is ZUN's spelled-out `y * 80`; `* ROW_SIZE` gives
   `imul` even under `-G`.
+- `!(x & 1)` loads through AL; `(x & 1) == 0` tests memory directly.
+- A ternary into a register variable goes through AX; separate `if`/`else`
+  stores (`mov si, imm`) mean `if`/`else`.
 - An I/O delay `jmp short $+2` is `__emit__(0xEB, 0x00)`; BASM has no `$`,
   and an inline jump to a C label on the next line makes TCC add a jump.
 - Locals that inline `asm` reads (`mov ax, gdc_start`) stay in memory.
@@ -87,7 +97,7 @@ disassembly; `th02_asmedit.py` removes/exports procedures and data labels.
    in AX, so check whether it is C at all.
 2. main_03__TEXT starts with `mima_init`, `mima_19C1D`, `mima_19C8D`,
    `mima_end` (a separate TU after `skill_calculate()`), then midboss 4 and
-   Marisa (stage 4 boss).
+   the rest of Marisa listed above.
 3. The rest of MAIN_01 (`_main`, `sub_B2AB`, `main_01c_TEXT` onward).
 4. MAIN_05 (`sub_1C3DF`, stage data loader) needs data labels for its raw
    DGROUP addresses (`scripts/th02_datamap.py`).

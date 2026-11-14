@@ -58,8 +58,7 @@ if __name__ == "__main__":
     want = [int(x, 16) for x in sys.argv[1:]]
     ents = list(entries())
     for w in want:
-        best = None
-        for e in ents:
-            if e[1] <= w:
-                best = e
-        print(f"{w:04X}: {best[0]} {best[1]:04X} | {best[2].strip()[:100]}")
+        idx = max(i for i, e in enumerate(ents) if e[1] <= w)
+        print(f"{w:04X}:")
+        for e in ents[max(0, idx - 4):idx + 2]:
+            print(f"   {e[0]} {e[1]:04X} | {e[2].strip()[:100]}")
