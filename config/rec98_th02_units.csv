@@ -421,8 +421,8 @@ MAIN.EXE,125,th02/dialog.cpp,rec98-c,CODE,DIALOG_TEXT,12C72,2116,0,byte-equal
 MAIN.EXE,126,th02_main.asm,rec98-asm,CODE,BOSS_5_TEXT,134B6,17865,0,byte-equal
 MAIN.EXE,127,th02/mima.cpp,rec98-c,CODE,BOSS_5_TEXT,17A7F,7882,0,byte-equal
 MAIN.EXE,128,th02/boss_5.cpp,rec98-c,CODE,BOSS_5_TEXT,19949,106,0,byte-equal
-MAIN.EXE,129,th02_main.asm,rec98-asm,CODE,MAIN_03__TEXT,199B3,6122,0,byte-equal
-MAIN.EXE,130,th02/marisa.cpp,rec98-c,CODE,MAIN_03__TEXT,1B19D,4330,0,byte-equal
+MAIN.EXE,129,th02_main.asm,rec98-asm,CODE,MAIN_03__TEXT,199B3,4482,0,byte-equal
+MAIN.EXE,130,th02/marisa.cpp,rec98-c,CODE,MAIN_03__TEXT,1AB35,5970,0,byte-equal
 MAIN.EXE,131,th02_main.asm,rec98-asm,CODE,MAIN_04_TEXT,1C287,0,0,empty
 MAIN.EXE,132,th02/main_04.cpp,rec98-c,CODE,MAIN_04_TEXT,1C287,344,0,byte-equal
 MAIN.EXE,133,th02_main.asm,rec98-asm,CODE,MAIN_05_TEXT,1C3DF,616,0,byte-equal

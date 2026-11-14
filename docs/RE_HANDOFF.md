@@ -16,13 +16,13 @@ Decompiled beyond ReC98 so far (all byte-exact):
   MAIN_01_TEXT continues in ASM segment `main_01c_TEXT`.
 - BOSS_5_TEXT: the complete Mima (stage 5 boss) block, 23 functions
   (`th02/main/boss/b4.cpp`, TU `th02/boss_4.cpp`).
-- MAIN_03__TEXT tail: Marisa (stage 4 boss) from `marisa_1B19D` through
-  `marisa_end`, 30 functions (`th02/main/boss/marisa.cpp`, TU
+- MAIN_03__TEXT tail: Marisa (stage 4 boss) from `marisa_1AB35` through
+  `marisa_end`, 35 functions (`th02/main/boss/marisa.cpp`, TU
   `th02/marisa.cpp`, `-zCMAIN_03__TEXT -G -a2`). Still ASM before it:
-  `marisa_init` (blocked by a `nopcall` with arguments), `marisa_1AA60`,
-  `1AB35`, `1AC7B`, `1AD80`, `1AE98`, `1B025`. Keep the TU start at an odd
-  address (now `0x1B19D`) or the `-a2` switch-table pad in `marisa_update()`
-  moves; `1AB35` and `1AC7B` are the next odd starting points.
+  `marisa_init` (blocked by a `nopcall` with arguments) and `marisa_1AA60`.
+  Keep the TU start at an odd address (now `0x1AB35`) or the `-a2`
+  switch-table pad in `marisa_update()` moves; adding `marisa_1AA60` alone
+  would make it even.
 - MAIN_04 circle helpers (`th02/main_04.cpp`), MAIN_06 score savers
   (`regist_m.cpp`).
 
