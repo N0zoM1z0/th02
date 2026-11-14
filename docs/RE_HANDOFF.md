@@ -2,11 +2,8 @@
 
 ## State
 
-- OP.EXE and MAIN.EXE are identical to the originals as whole files (header
-  and relocation table included). ZUN.COM is identical as a file. MAINE.EXE
-  has an identical program image and relocation table; only its header
-  format differs (see "Linking" below). Verified by cold run
-  `session5-cold3`.
+- OP.EXE, MAIN.EXE, MAINE.EXE and ZUN.COM are identical to the originals as
+  whole files, from a cold build of the patch series (`session5-cold5`).
 - Work lives on branch `th02-recon` of the ReC98 worktree
   `.analysis/work/rec98` and is exported as `patches/rec98/*.patch`
   (`git format-patch b6ba5b0a52..th02-recon`). `scripts/build_th02.py`
@@ -160,11 +157,9 @@ boundaries, which the target's relocation table records:
   far calls, so `nopcall` emits a real far call for TH02 (under `NOSMART`,
   which keeps TASM from shortening it). This fixed OP's header size.
 - MAINE.EXE's original header starts the relocation table at `0x1C` and is
-  only paragraph-aligned, without TLINK's `0x3E` layout: it was rewritten by
-  another tool after linking. Everything after the header matches. The
-  layout is what UNLZEXE writes, so the file may have been LZEXE-packed and
-  unpacked again at some point; `SS:SP` and the allocation fields are
-  TLINK's.
+  only paragraph-aligned, unlike TLINK's `0x3E` layout (UNLZEXE writes this
+  layout). `Pipeline/exemin.c` rewrites TLINK's output that way after linking;
+  image, relocation order, `SS:SP` and allocation fields stay TLINK's.
 - Original TUs found this way: `main_01a.cpp` plus the stage loop up to
   `DemoPlay()`; the random number ring; `cfg_load()`; the game over menu;
   `GameExecl()` with `sub_C5B0()`; `player_invalidate()`; bombanim with the
@@ -175,4 +170,3 @@ boundaries, which the target's relocation table records:
 1. `sub_3F8A()`, if a link setup that keeps the near call turns up.
 2. Move the remaining TU data and string literals out of `th02_main.asm`
    into their TUs, using the data order as the guide.
-3. Identify the tool that rewrote MAINE.EXE's header.

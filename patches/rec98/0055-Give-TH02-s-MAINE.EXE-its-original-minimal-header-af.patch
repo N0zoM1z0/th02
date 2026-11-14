@@ -1,0 +1,180 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 23:38:38 +0100
+Subject: [PATCH] Give TH02's MAINE.EXE its original minimal header after
+ linking
+
+The original MAINE.EXE starts its relocation table at 0x1C and pads the
+header only to a paragraph. Pipeline/exemin rewrites TLINK's output into
+that layout, leaving the image and relocation order unchanged.
+---
+ Pipeline/exemin.c | 106 ++++++++++++++++++++++++++++++++++++++++++++++
+ Tupfile.lua       |  17 ++++++--
+ 2 files changed, 119 insertions(+), 4 deletions(-)
+ create mode 100644 Pipeline/exemin.c
+
+diff --git a/Pipeline/exemin.c b/Pipeline/exemin.c
+new file mode 100644
+index 00000000..c764de6e
+--- /dev/null
++++ b/Pipeline/exemin.c
+@@ -0,0 +1,106 @@
++/* ReC98
++ * -----
++ * Rewrites a DOS .EXE with the smallest possible header: the relocation table
++ * directly follows the 28-byte header, which is padded to a paragraph. This
++ * matches the header of TH02's original MAINE.EXE, which was rewritten in
++ * this way after TLINK had linked it. The program image and the order of the
++ * relocations stay unchanged.
++ */
++
++#include <stdio.h>
++#include <string.h>
++
++#define HEADER_WORDS 14
++#define HEADER_SIZE (HEADER_WORDS * 2)
++
++enum {
++	H_LAST_PAGE_SIZE = 1,
++	H_PAGES = 2,
++	H_RELOC_COUNT = 3,
++	H_HEADER_PARAS = 4,
++	H_RELOC_OFFSET = 12,
++};
++
++static char buf[4096];
++
++static int copy(FILE *fo, FILE *fi, unsigned long len)
++{
++	while(len > 0) {
++		size_t chunk = ((len > sizeof(buf)) ? sizeof(buf) : (size_t)len);
++		if(fread(buf, 1, chunk, fi) != chunk) {
++			return 1;
++		}
++		if(fwrite(buf, 1, chunk, fo) != chunk) {
++			return 1;
++		}
++		len -= chunk;
++	}
++	return 0;
++}
++
++int main(int argc, char **argv)
++{
++	unsigned int h[HEADER_WORDS];
++	unsigned long header_old;
++	unsigned long header_new;
++	unsigned long reloc_offset;
++	unsigned long image_size;
++	unsigned long file_size;
++	FILE *fi;
++	FILE *fo;
++
++	if(argc != 3) {
++		fprintf(stderr, "Usage: %s in.exe out.exe\n", argv[0]);
++		return 1;
++	}
++	fi = fopen(argv[1], "rb");
++	if(!fi) {
++		fprintf(stderr, "%s: can't open\n", argv[1]);
++		return 1;
++	}
++	if(fread(h, 2, HEADER_WORDS, fi) != HEADER_WORDS) {
++		fprintf(stderr, "%s: too short\n", argv[1]);
++		return 1;
++	}
++	fseek(fi, 0, SEEK_END);
++	file_size = ftell(fi);
++	header_old = ((unsigned long)h[H_HEADER_PARAS] * 16);
++	reloc_offset = h[H_RELOC_OFFSET];
++	image_size = (file_size - header_old);
++	header_new = (
++		(HEADER_SIZE + ((unsigned long)h[H_RELOC_COUNT] * 4) + 15) & ~15ul
++	);
++	file_size = (header_new + image_size);
++
++	h[H_LAST_PAGE_SIZE] = (unsigned int)(file_size % 512);
++	h[H_PAGES] = (unsigned int)((file_size + 511) / 512);
++	h[H_HEADER_PARAS] = (unsigned int)(header_new / 16);
++	h[H_RELOC_OFFSET] = HEADER_SIZE;
++
++	fo = fopen(argv[2], "wb");
++	if(!fo) {
++		fprintf(stderr, "%s: can't create\n", argv[2]);
++		return 1;
++	}
++	fwrite(h, 2, HEADER_WORDS, fo);
++	fseek(fi, reloc_offset, SEEK_SET);
++	if(copy(fo, fi, ((unsigned long)h[H_RELOC_COUNT] * 4))) {
++		fprintf(stderr, "%s: truncated relocation table\n", argv[1]);
++		return 1;
++	}
++	memset(buf, 0, sizeof(buf));
++	fwrite(
++		buf,
++		1,
++		(size_t)(header_new - HEADER_SIZE - ((unsigned long)h[H_RELOC_COUNT] * 4)),
++		fo
++	);
++	fseek(fi, header_old, SEEK_SET);
++	if(copy(fo, fi, image_size)) {
++		fprintf(stderr, "%s: truncated image\n", argv[1]);
++		return 1;
++	}
++	fclose(fo);
++	fclose(fi);
++	return 0;
++}
+diff --git a/Tupfile.lua b/Tupfile.lua
+index 40db166a..5cf8e7dc 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -142,12 +142,13 @@ end
+ 
+ ---@param exe_stem string
+ ---@param inputs ReC98Input[]
+-function Config:link(exe_stem, inputs)
++---@param bin_root? string Output directory, if not the config's own
++function Config:link(exe_stem, inputs, bin_root)
+ 	local model_c = self.cflags:match("-m([tsmclh])")
+ 	local objs = self:build(inputs)
+ 
+ 	local obj_root = self.obj_root:gsub("/", "\\")
+-	local bin_root = self.bin_root:gsub("/", "\\")
++	bin_root = (bin_root or self.bin_root):gsub("/", "\\")
+ 
+ 	local ext = (self.lflags:find("-t") and ".com" or ".exe")
+ 	local rsp_fn = string.format("%s%s.@l", obj_root, exe_stem)
+@@ -260,6 +261,7 @@ end
+ 
+ local zungen = pipeline_tool_cfg:link("zungen", { "Pipeline/zungen.c" })
+ local comcstm = pipeline_tool_cfg:link("comcstm", { "Pipeline/comcstm.c" })
++local exemin = pipeline_tool_cfg:link("exemin", { "Pipeline/exemin.c" })
+ local zun_stub = pipeline_stub_cfg:stub("Pipeline/zun_stub.asm")
+ local cstmstub = pipeline_stub_cfg:stub("Pipeline/cstmstub.asm")
+ 
+@@ -575,7 +577,8 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/mima.cpp",
+ 	"th02/marisa.cpp",
+ })
+-th02:branch(MODEL_LARGE, { cflags = "-DBINARY='E'" }):link("maine", {
++-- TH02's MAINE.EXE got a minimal header after linking.
++local th02_maine_tlink = th02:branch(MODEL_LARGE, { cflags = "-DBINARY='E'" }):link("maine", {
+ 	{ "th02/end.cpp", extra_inputs = th02_sprites["verdict"] },
+ 	"th02_maine.asm",
+ 	"th02/grppsafx.cpp",
+@@ -599,7 +602,13 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='E'" }):link("maine", {
+ 	"th02/maine_03.cpp",
+ 	"th02/maine_04.cpp",
+ 	"th02/staff.cpp",
+-})
++}, "obj/th02/")
++Rules:add_16(
++	{ th02_maine_tlink, extra_inputs = { exemin } },
++	exemin,
++	"%1f %o",
++	"bin/th02/maine.exe"
++)
+ -- ----
+ 
+ -- TH03
