@@ -10,25 +10,25 @@
   (`git format-patch b6ba5b0a52..th02-recon`). `scripts/build_th02.py`
   applies the series to a cold `git archive` and rebuilds everything.
 
-Decompiled beyond ReC98 so far (all byte-exact):
-- MAIN_01: stage init, post-continue reset and pause menu
-  (`th02/main_01a.cpp`), and the stage loop (`th02/main_01b.cpp`). The rest of
-  MAIN_01_TEXT continues in ASM segment `main_01c_TEXT`.
-- BOSS_5_TEXT: the complete Mima (stage 5 boss) block, 23 functions
-  (`th02/main/boss/b4.cpp`, TU `th02/boss_4.cpp`).
-- MAIN_03__TEXT tail: Marisa (stage 4 boss) from `marisa_1AB35` through
-  `marisa_end`, 35 functions (`th02/main/boss/marisa.cpp`, TU
-  `th02/marisa.cpp`, `-zCMAIN_03__TEXT -G -a2`). Still ASM before it:
-  `marisa_init` (blocked by a `nopcall` with arguments) and `marisa_1AA60`.
-  Keep the TU start at an odd address (now `0x1AB35`) or the `-a2`
-  switch-table pad in `marisa_update()` moves; adding `marisa_1AA60` alone
-  would make it even.
-- MAIN_04 circle helpers (`th02/main_04.cpp`), MAIN_05 stage data loader
-  (`th02/main_05.cpp`), MAIN_06 score savers (`regist_m.cpp`), and the player
-  controls at the end of `player.cpp` (needs `-zPmain_01` for its table).
-- MAINE: the last assembly functions (`extra_unlock_animate`,
-  `extra_clear_animate`, `main`) are now at the end of `end.cpp`; MAINE's game
-  code is entirely C++.
+Decompiled beyond ReC98 so far (all byte-exact; cold run `session4-cold1`):
+- MAIN code group 1 is entirely C++ except ReC98's `pointnum_put()` include:
+  `main()` and init, stage init/loop/pause, boss/BGM/demo callbacks, config
+  loading, game over/continue, `GameExecl()`, player init
+  (`th02/main_01a.cpp`, `main_01b.cpp`, `main_01c.cpp`), all shot code
+  (`th02/main/player/shot.cpp`) and bombs (`th02/main/player/bombanim.cpp`).
+- MAIN_03: the boss explosion/reset functions at the start of BULLET_TEXT
+  (`th02/main/boss/explode.cpp`), the pillar objects before the dialog code
+  (`th02/main/pillar.cpp`), the Mima block in BOSS_5_TEXT and Marisa from
+  `marisa_1AB35` on (`th02/mima.cpp`, `th02/marisa.cpp`).
+- MAIN_04 circle helpers, MAIN_05 stage data loader, MAIN_06 score savers,
+  player controls in `player.cpp`.
+- MAINE's game code is entirely C++.
+
+Still assembly in MAIN: DIALOG_TEXT before the pillars (stage 3 midboss and
+the Five Magic Stones, `sub_10E4F`/`sub_10E95`), `shots_hittest()` (own
+module `th02/main/hittest.asm`, see below), BOSS_5_TEXT before Mima (Rika,
+Meira, midbosses 1/2/x, Sigma), main_03__TEXT head (`mima_init` …
+`marisa_1AA60`), and ZUN code inside `_TEXT`.
 
 ## Loop
 
@@ -62,18 +62,22 @@ disassembly; `th02_asmedit.py` removes/exports procedures and data labels.
 - `resident_t::rank` and `::bgm_mode` are unsigned: comparisons against
   nonzero constants are bytewise. MAIN_05's loader also compares `rank`
   bytewise, unlike every other MAIN TU.
-- TLINK only turns a cross-TU far call into `nop / push cs / call near` when
-  the target symbol has no group in its PUBDEF and its segment frame equals the
-  caller's, which holds for MAIN_03_TEXT. ReC98 splits each original code
-  segment into several grouped segments, so C++ calls into a later segment
-  of the group spell the sequence out with inline `asm` until the group is one
-  segment again (see `mima_update()` → `mima_end()`).
-- The inline `nop / push cs / call near` stand-in only works for calls
-  without stack arguments: TCC merges the cleanup of consecutive cdecl calls
-  (`mima_init()` → `sub_13ABB()` has one `add sp, 6` for two calls). To
-  decompile such callers exactly, the `main_03` group has to become one
-  physical segment again, i.e. split `th02_main.asm` into modules interleaved
-  with the C++ objects, all using the same code segment name.
+- TLINK turns a far call into `nop / push cs / call near` by itself when
+  caller and callee share one physical segment. The three C++ units after
+  `main()` use `-zCmain_01_TEXT` and get `demo_load()`, `GameExecl()` and
+  `DemoPlay()` calls right, arguments included. Calls into segments that
+  ReC98 still keeps separate need the inline-asm stand-in, which only works
+  without stack arguments (TCC merges consecutive cdecl cleanups).
+- To decompile a function in the middle of an assembly segment, move the
+  assembly after it into its own module (`th02/main/hittest.asm`) and link
+  it after the new C++ object; segment contributions follow object order.
+  Such a module must not use `.model` (it adds an empty `<FILE>_TEXT`
+  segment that shifts DGROUP).
+- `shots_hittest()` was compiled with `-2` (inverted short jumps over near
+  JMPs). Its C++ version (`/tmp` copy not kept; rebuild from the asm) matches
+  with `_BL = shot_level; _BH = 0; _BX += _BX;` table reads, `_BX = y_offset`
+  coordinate reads, `-= 0x80u`, and a do-while; only the final reload of
+  `damage` before `return` was not reproduced.
 - Two adjacent constant arguments are pushed as one `push imm32` only when both
   parameters are `int`. `bullets_add_16x16()` therefore takes `int patnum`.
 - Register variables: TCC's automatic choice depends on use. A result that is
@@ -99,17 +103,30 @@ disassembly; `th02_asmedit.py` removes/exports procedures and data labels.
 - Byte constant subtraction (`x - 0x40`) compiles to `add al, -0x40`.
 - A ternary assigning to a byte local shares one store (`mov [v], al`); the
   original's separate stores mean `if`/`else`.
+- Code after `if(...) continue;` starts at a jump label, which resets TCC's
+  register knowledge (`push si` instead of `push ax`, `sub_E2D9()`).
+- Locals get stack slots in declaration order, first declared at the highest
+  address; a block-scoped local comes after all function-level ones.
+- `++p->age` and `p->age += 1` load through AL; `p->age++` is `inc mem`.
+- Leaf code without calls keeps loop counters and copies in AX/CX/DX
+  (`shots_clear()`, `sub_C5B0()`); a plain `int page = page_back * 2` local
+  lands in CX/DX, while `register` changes the choice.
+- TCC 4.02 rejects `-Oc`/`-Og` etc. in `#pragma option`.
+- Byte pairs written by one 16-bit store (`shot_t` flag/age,
+  patnum/from_option) need an explicit 16-bit write.
+- Struct copies from an initialized constant (`bomb_reimu_c()` speeds,
+  `stage_loop()` scroll lines) are `T local = EXTERN_CONST;`.
 - TCC's cross-jumping merges identical statement tails; write the natural
   duplicated code first. A jump into the middle of another branch needs `goto`
   (`mima_183D0`).
 
 ## Next useful actions
 
-1. Continue backward through BOSS_5_TEXT (`sub_17A55` and earlier). The TU
-   before the Mima code ends at 0x17A7F; `sub_17A55` keeps its loop counter
-   in AX, so check whether it is C at all.
-2. main_03__TEXT starts with `mima_init`, `mima_19C1D`, `mima_19C8D`,
-   `mima_end` (a separate TU after `skill_calculate()`), then midboss 4 and
-   the rest of Marisa listed above.
-3. The rest of MAIN_01 (`_main`, `sub_B2AB`, `main_01c_TEXT` onward).
-5. Whole-product identity: header size and relocation order.
+1. DIALOG_TEXT backwards from `stones_12778`: `stones_update`, `stones_end`
+   and `stones_init` are read; the trailing `db 0` before `shots_hittest`
+   becomes word alignment of `hittest.asm`. `stones_init` passes an argument
+   through a nopcall into BOSS_5 (`sub_13ABB`).
+2. BOSS_5_TEXT backwards from `sub_17A55`; main_03__TEXT head.
+3. Merge each original code segment group into one physical segment (split
+   `th02_main.asm` into modules) to drop the remaining nopcall stand-ins.
+4. Whole-product identity: header size and relocation order.

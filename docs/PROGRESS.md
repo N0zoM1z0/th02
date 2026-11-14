@@ -11,7 +11,7 @@ the C/C++ share of the game *segments*, not of every ZUN-written byte.
 | Product | C/C++ byte-equal | C/C++ differing | ASM game code | Library | Game segments in C/C++ |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | OP.EXE | 11,759 | 0 | 0 | 43,063 | 100.0% |
-| MAIN.EXE | 35,402 | 0 | 39,505 | 46,534 | 47.3% |
+| MAIN.EXE | 45,388 | 0 | 29,519 | 46,534 | 60.6% |
 | MAINE.EXE | 11,663 | 0 | 0 | 41,450 | 100.0% |
 
 ZUN.COM: whole file byte-equal.
