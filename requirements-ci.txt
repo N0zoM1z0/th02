@@ -1,0 +1,6 @@
+# Optional decoder/emulator test dependencies; basic CI uses only the standard library.
+capstone==5.0.6
+# 2.1.4 fails repeat-run instruction-budget negative controls; keep the tested engine.
+unicorn==1.0.3
+# Unicorn 1.x imports distutils/pkg_resources, including on Python 3.12+.
+setuptools==80.9.0

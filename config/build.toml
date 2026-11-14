@@ -1,0 +1,10 @@
+schema_version = 1
+phase = "rec98-import"
+status = "open"
+reference_revision = "b6ba5b0a529edbb31efdf8c0e939263804f8ee47"
+products = ["OP.EXE", "MAIN.EXE", "MAINE.EXE", "ZUN.COM"]
+builder = "scripts/build_th02.py: pinned ReC98 + patches/rec98, ReC98 build.bat"
+ledger = "config/rec98_th02_units.csv"
+source_graph = "ReC98 link graphs (Tupfile.lua); src/ overlays not yet used"
+link_order = "ReC98 order; original relocation order differs (open)"
+packaging = "ZUN.COM byte-equal; EXE headers differ from originals (open)"
