@@ -1,0 +1,310 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:03:45 +0100
+Subject: [PATCH] Decompile sub_3F8A() into dots.cpp
+
+Like sparks_add() in spark.cpp, it calls vector2() in SHARED with a near
+call, written as inline assembly with a near declaration. Its call to
+circle_dot_put() has no NOP, so it was compiled in the same TU after
+that function. The page coordinate code is pseudo-register C.
+---
+ Tupfile.lua            |   1 -
+ th02/main/dots.cpp     |  82 +++++++++++++++++++
+ th02/main/dots_upd.asm | 179 -----------------------------------------
+ 3 files changed, 82 insertions(+), 180 deletions(-)
+ delete mode 100644 th02/main/dots_upd.asm
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index fcdabf7d..8b87ad9c 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -530,7 +530,6 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/main/mpn_put.cpp",
+ 	"th02/main/pf.asm",
+ 	"th02/main/dots.cpp",
+-	"th02/main/dots_upd.asm",
+ 	"th02/frmdely1.cpp",
+ 	"th02/input_rs.cpp",
+ 	"th02/exit.cpp",
+diff --git a/th02/main/dots.cpp b/th02/main/dots.cpp
+index 745f77a4..4ff60b28 100644
+--- a/th02/main/dots.cpp
++++ b/th02/main/dots.cpp
+@@ -47,6 +47,12 @@ extern int8_t byte_1FFFA;
+ extern const uint8_t CIRCLE_DOT_PATTERNS[];
+ 
+ extern bool reduce_effects;
++extern uint8_t byte_20168;
++extern uint8_t byte_20169;
++
++// ZUN landmine: Called with a near call from _TEXT into SHARED, which only
++// works as long as vector2() stays within 64 KiB of _TEXT's frame.
++void pascal near vector2(int far &x, int far &y, unsigned char angle, int length);
+ 
+ #define pos_at(p, page_offset) ( \
+ 	*reinterpret_cast<point_t near *>( \
+@@ -163,3 +169,79 @@ void sub_3EF4(void)
+ }
+ 
+ #pragma codestring "\x90"
++
++#pragma option -2
++
++void sub_3F8A(void)
++{
++	register dot_t near *p;
++	register int speed_threshold;
++	int i;
++	int velocity_x;
++	int velocity_y;
++
++	grcg_setcolor(GC_RMW, byte_1FFF8);
++	byte_20168 = byte_1FFFA;
++	byte_20169 = byte_1FFF8;
++	_AX = FP_OFF(dots);
++	p = reinterpret_cast<dot_t near *>(_AX);
++	for(i = 0; i < DOT_COUNT; i++, p++) {
++		if(p->flag != DF_ALIVE) {
++			continue;
++		}
++		p->speed += word_1FFF2;
++		p->angle += word_1FFF4;
++
++		// ZUN bloat: vector2(velocity_x, velocity_y, p->angle, p->speed);
++		asm {
++			push	ss;
++			lea 	ax, velocity_x;
++			push	ax;
++			push	ss;
++			lea 	ax, velocity_y;
++			push	ax;
++			db	0xFF, 0x74, 0x01; // PUSH WORD PTR [SI + 1] (dot_t::angle)
++			db	0x8A, 0x44, 0x0B; // MOV AL, [SI + 0Bh] (dot_t::speed)
++			mov 	ah, 0;
++			push	ax;
++			nop;
++			push	cs;
++			call	near ptr vector2;
++		}
++
++		_BX = (page_back * sizeof(point_t));
++		_DX = velocity_x;
++		pos_at(p, _BX).x += static_cast<int>(_DX);
++		_DX = velocity_y;
++		pos_at(p, _BX).y += static_cast<int>(_DX);
++		_DX = pos_at(p, _BX).x;
++		static_cast<int>(_DX) >>= 4;
++		circle_dot_left = _DX;
++		_AX = pos_at(p, _BX).y;
++		static_cast<int>(_AX) >>= 4;
++		circle_dot_top = _AX;
++		if(
++			(static_cast<int>(_DX) >= 416) ||
++			(static_cast<int>(_DX) <= 24) ||
++			(static_cast<int>(_AX) <= 8) ||
++			(static_cast<int>(_AX) >= 384)
++		) {
++			p->flag = DF_REMOVE;
++			continue;
++		}
++		speed_threshold = ((word_1FFF6 << 2) + word_1FFF6);
++		_BL = 5;
++		while(speed_threshold > word_1FFF6) {
++			if(p->speed > speed_threshold) {
++				break;
++			}
++			speed_threshold -= word_1FFF6;
++			_BL--;
++		}
++		p->size = _BL;
++		if(!reduce_effects || (page_back == (i & 1))) {
++			circle_dot_put(p->size);
++		}
++	}
++	grcg_off();
++}
+diff --git a/th02/main/dots_upd.asm b/th02/main/dots_upd.asm
+deleted file mode 100644
+index 1bfda713..00000000
+--- a/th02/main/dots_upd.asm
++++ /dev/null
+@@ -1,179 +0,0 @@
+-; ReC98
+-; -----
+-; The update and render function for TH02's dots, split out of th02_main.asm
+-; after the rest of their code was decompiled into th02/main/dots.cpp.
+-; Its call to vector2() in SHARED is PUSH CS / CALL near, with a near fixup that
+-; TLINK resolves relative to _TEXT's frame 0. TLINK 6.10 never shortens a far
+-; call across physical segments, so a natural C++ call would give a far CALL
+-; with an extra relocation.
+-
+-	.386
+-	locals
+-
+-_DATA	segment word public 'DATA' use16
+-	extrn _byte_1FFF8:byte
+-	extrn _byte_1FFFA:byte
+-	extrn _byte_20168:byte
+-	extrn _byte_20169:byte
+-	extrn _word_1FFF2:word
+-	extrn _word_1FFF4:word
+-	extrn _word_1FFF6:word
+-	extrn _page_back:byte
+-	extrn _reduce_effects:byte
+-	extrn _circle_dot_left:word
+-	extrn _circle_dot_top:word
+-	extrn _dots:byte
+-_DATA	ends
+-
+-DGROUP group _DATA
+-
+-TEXT group _TEXT
+-_TEXT	segment	byte public 'CODE' use16
+-	assume cs:TEXT, ds:DGROUP
+-	extrn GRCG_SETCOLOR:far
+-	extrn GRCG_OFF:far
+-	extrn @CIRCLE_DOT_PUT$QI:far
+-	extrn @VECTOR2$QMIT1UCI:near
+-
+-public @sub_3F8A$qv
+-@sub_3F8A$qv	proc far
+-
+-var_6		= word ptr -6
+-var_4		= word ptr -4
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 6
+-		push	si
+-		push	di
+-		push	0C0h	; GC_RMW
+-		mov	al, _byte_1FFF8
+-		mov	ah, 0
+-		push	ax
+-		nop
+-		call	GRCG_SETCOLOR
+-		mov	al, _byte_1FFFA
+-		mov	_byte_20168, al
+-		mov	al, _byte_1FFF8
+-		mov	_byte_20169, al
+-		mov	ax, offset _dots
+-		mov	si, ax
+-		mov	[bp+var_2], 0
+-		jmp	loc_407E
+-; ---------------------------------------------------------------------------
+-
+-loc_3FB9:
+-		cmp	byte ptr [si], 1
+-		jz	short loc_3FC1
+-		jmp	loc_4078
+-; ---------------------------------------------------------------------------
+-
+-loc_3FC1:
+-		mov	al, [si+0Bh]
+-		add	al, byte ptr _word_1FFF2
+-		mov	[si+0Bh], al
+-		mov	al, [si+1]
+-		add	al, byte ptr _word_1FFF4
+-		mov	[si+1],	al
+-		push	ss
+-		lea	ax, [bp+var_4]
+-		push	ax
+-		push	ss
+-		lea	ax, [bp+var_6]
+-		push	ax
+-		push	word ptr [si+1]
+-		mov	al, [si+0Bh]
+-		mov	ah, 0
+-		push	ax
+-		nop
+-		push	cs
+-		call	near ptr @VECTOR2$QMIT1UCI
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		mov	dx, [bp+var_4]
+-		add	[bx+si+2], dx
+-		mov	dx, [bp+var_6]
+-		add	[bx+si+4], dx
+-		mov	dx, [bx+si+2]
+-		sar	dx, 4
+-		mov	_circle_dot_left, dx
+-		mov	ax, [bx+si+4]
+-		sar	ax, 4
+-		mov	_circle_dot_top, ax
+-		cmp	dx, 1A0h
+-		jge	short loc_402B
+-		cmp	dx, 18h
+-		jle	short loc_402B
+-		cmp	ax, 8
+-		jle	short loc_402B
+-		cmp	ax, 180h
+-		jl	short loc_4030
+-
+-loc_402B:
+-		mov	byte ptr [si], 2
+-		jmp	short loc_4078
+-; ---------------------------------------------------------------------------
+-
+-loc_4030:
+-		mov	ax, _word_1FFF6
+-		shl	ax, 2
+-		add	ax, _word_1FFF6
+-		mov	di, ax
+-		mov	bl, 5
+-		jmp	short loc_404F
+-; ---------------------------------------------------------------------------
+-
+-loc_4040:
+-		mov	al, [si+0Bh]
+-		mov	ah, 0
+-		cmp	ax, di
+-		jg	short loc_4055
+-		sub	di, _word_1FFF6
+-		dec	bl
+-
+-loc_404F:
+-		cmp	di, _word_1FFF6
+-		jg	short loc_4040
+-
+-loc_4055:
+-		mov	[si+0Ah], bl
+-		cmp	_reduce_effects, 0
+-		jz	short loc_406E
+-		mov	al, _page_back
+-		mov	ah, 0
+-		mov	dx, [bp+var_2]
+-		and	dx, 1
+-		cmp	ax, dx
+-		jnz	short loc_4078
+-
+-loc_406E:
+-		mov	al, [si+0Ah]
+-		mov	ah, 0
+-		push	ax
+-		call	@CIRCLE_DOT_PUT$QI
+-
+-loc_4078:
+-		inc	[bp+var_2]
+-		add	si, 0Ch
+-
+-loc_407E:
+-		cmp	[bp+var_2], 1Eh
+-		jge	short loc_4087
+-		jmp	loc_3FB9
+-; ---------------------------------------------------------------------------
+-
+-loc_4087:
+-		nop
+-		call	GRCG_OFF
+-		pop	di
+-		pop	si
+-		leave
+-		retf
+-@sub_3F8A$qv	endp
+-
+-_TEXT	ends
+-
+-	end

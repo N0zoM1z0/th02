@@ -6,14 +6,12 @@ Japanese executables. Library covers the Borland runtime, c0 and the
 assembly files' `_TEXT`: master.lib plus ZUN's hand-written `pfopen()`.
 ASM game code is MAIN's `shots_hittest()` and `pointnum_put()`. ZUN wrote
 both as assembly modules (TASM fixup order, a word-aligned code segment,
-`enter 0, 0`), so they stay assembly. The only other ZUN code in assembly
-is `sub_3F8A()` in MAIN's `_TEXT`: its near call into SHARED cannot come
-from a far call under TLINK 6.10.
+`enter 0, 0`), so they stay assembly. All other ZUN code is C/C++.
 
 | Product | C/C++ byte-equal | C/C++ differing | ASM game code | Library | Game segments in C/C++ |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | OP.EXE | 11,759 | 0 | 0 | 43,063 | 100.0% |
-| MAIN.EXE | 74,909 | 0 | 535 | 45,996 | 99.3% |
+| MAIN.EXE | 75,171 | 0 | 535 | 45,734 | 99.3% |
 | MAINE.EXE | 11,663 | 0 | 0 | 41,450 | 100.0% |
 
 ZUN.COM: whole file byte-equal.

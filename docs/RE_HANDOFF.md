@@ -3,7 +3,7 @@
 ## State
 
 - OP.EXE, MAIN.EXE, MAINE.EXE and ZUN.COM are identical to the originals as
-  whole files, from a cold build of the patch series (`session5-cold7`).
+  whole files, from a cold build of the patch series (`session5-cold8`).
 - Work lives on branch `th02-recon` of the ReC98 worktree
   `.analysis/work/rec98` and is exported as `patches/rec98/*.patch`
   (`git format-patch b6ba5b0a52..th02-recon`). `scripts/build_th02.py`
@@ -12,10 +12,8 @@
 All ZUN C code in MAIN is C++. What remains assembly:
 - `pointnum_put()` (`th02/main/pointnum/num_put_m.asm`) and `pfopen()`
   (`th02/main/pf.asm`): hand-written by ZUN, like their TH04/TH05 siblings.
-- `sub_3F8A()` (`th02/main/dots_upd.asm`): its call to `vector2()` in SHARED
-  is `push cs / call near` with a near fixup (now written symbolically).
-  TLINK 6.10 never shortens a far call across physical segments, so a
-  natural C++ call gives a far CALL and an extra relocation.
+- `sub_3F8A()` is C++ at the end of `dots.cpp`. Its near call into SHARED
+  uses `spark.cpp`'s inline-asm form with a `near` `vector2()` declaration.
 - `shots_hittest()` (`th02/main/hittest.asm`): ZUN's own assembly module. The
   target lists its relocations in ascending (TASM) order, and its code
   segment is word-aligned (a `00` pad after stage 3), which TCC never emits.
@@ -23,12 +21,13 @@ All ZUN C code in MAIN is C++. What remains assembly:
 - `pointnum_put()` and `shots_hittest()` are both preceded by a `00` pad,
   i.e. word-aligned modules, which TCC never emits.
 - master.lib code and data stay in assembly. ZUN data is defined in its C++
-  TUs (string literals included) for `main_01a.cpp`, `main_05.cpp`,
-  `player.cpp`, stage 3, dialog, Rika, Meira, `regist_m.cpp`, Sigma, the
-  enemies, Mima and Marisa; `hittest.asm` owns its tables. The rest is still
-  in `th02_main.asm`, ending at `spark_accel_x`. Its owner is unclear: the
-  bomb strings come before the bomb particle and spark sprites, so these may
-  be a separate TU (or ZUN's strings were arrays, not literals).
+  TUs (string literals included) for `main_01a.cpp`, `main_05.cpp`, the
+  player, the bombs, the sparks (sprites via bmp2arr's C++ output; the spark
+  TU is linked after the bombs, where its data sits), stage 3, dialog, Rika,
+  Meira, `regist_m.cpp`, Sigma, the enemies, Mima and Marisa. The rest is
+  still in `th02_main.asm`, ending with the HUD TU's data (score variables
+  up to `POWER_TO_SHOT_LEVEL`, which sits in the HUD's literal pool) and
+  `total_bombs_used` (the bomb TU's first variable).
 
 ## Loop
 
@@ -183,6 +182,5 @@ boundaries, which the target's relocation table records:
 
 ## Next useful actions
 
-1. `sub_3F8A()`, if a link setup that keeps the near call turns up.
-2. Continue moving data out of `th02_main.asm` from its end, starting with
-   the spark/bomb block (decide its owner first).
+1. Continue moving data out of `th02_main.asm` from its end: the HUD TU
+   (`hud.cpp` with its `score.cpp`/`loadfree.cpp` includes) is next.

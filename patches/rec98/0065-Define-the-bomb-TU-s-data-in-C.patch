@@ -1,0 +1,113 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:04:41 +0100
+Subject: [PATCH] Define the bomb TU's data in C++
+
+---
+ th02/main/player/bombanim.cpp | 26 +++++++++++---------------
+ th02_main.asm                 | 14 --------------
+ 2 files changed, 11 insertions(+), 29 deletions(-)
+
+diff --git a/th02/main/player/bombanim.cpp b/th02/main/player/bombanim.cpp
+index fbd44ad4..998f3abe 100644
+--- a/th02/main/player/bombanim.cpp
++++ b/th02/main/player/bombanim.cpp
+@@ -49,12 +49,6 @@ extern tile_mode_t bomb_c_tile_mode;
+ extern tile_mode_t bomb_b_tile_mode;
+ extern uint8_t bomb_b_row;
+ 
+-extern const char aBombs_bft[];
+-extern const char aBomb1_pi[];
+-extern const char aBomb2_pi[];
+-extern const char aBomb3_pi[];
+-extern const char aBomb1_bft[];
+-extern const char asc_1E6DF[];
+ 
+ void pascal near bomb_circle_point_put(screen_x_t left, screen_y_t top);
+ void pascal near bomb_particle_put_8(screen_x_t left, screen_y_t top, int cel);
+@@ -69,20 +63,20 @@ extern "C" bool16 pascal near bomb_reimu_c(void);
+ 
+ void near sub_E178(void)
+ {
+-	file_ropen(aBombs_bft);
++	file_ropen("bombs.bft");
+ 	file_seek(32, 0);
+ 	bombs_bft = reinterpret_cast<uint8_t far *>(hmem_allocbyte(0x438));
+ 	file_read(bombs_bft, 0x438);
+ 	file_close();
+ 	if(resident->shottype == 0) {
+-		pi_load(1, aBomb1_pi);
++		pi_load(1, "bomb1.pi");
+ 		playchar_bomb_func = bomb_reimu_a;
+ 	} else if(resident->shottype == 2) {
+-		pi_load(1, aBomb3_pi);
++		pi_load(1, "bomb3.pi");
+ 		playchar_bomb_func = bomb_reimu_c;
+ 	} else if(resident->shottype == 1) {
+-		pi_load(1, aBomb2_pi);
+-		file_ropen(aBomb1_bft);
++		pi_load(1, "bomb2.pi");
++		file_ropen("bomb1.bft");
+ 		file_seek(80, 0);
+ 		bomb_b_bft = reinterpret_cast<uint8_t far *>(hmem_allocbyte(0x1440));
+ 		file_read(bomb_b_bft, 0x1440);
+@@ -369,13 +363,15 @@ struct bomb_c_speeds_t {
+ 	pixel_t v[48];
+ };
+ 
+-extern const bomb_c_speeds_t BOMB_C_SPEEDS;
+ 
+ extern "C" bool16 pascal near bomb_reimu_c(void)
+ {
+ 	screen_y_t top;
+ 	int i;
+-	bomb_c_speeds_t speeds = BOMB_C_SPEEDS;
++	bomb_c_speeds_t speeds = {
++		4, 3, 3, 2, 2, 1, 1, 0, 0, 2, 3, 2, 1, 0, 1, 2, 1, 0, 0, 0, 2, 3, 3, 2,
++		3, 1, 2, 0, 0, 1, 1, 2, 2, 3, 1, 2, 3, 2, 1, 0, 1, 1, 2, 2, 3, 3, 4, 4,
++	};
+ 
+ 	grcg_setcolor(GC_RMW, 2);
+ 	if(bomb_frame < BOMB_CIRCLE_FRAMES) {
+@@ -449,14 +445,14 @@ void pascal near bomb_b_row_put(int row)
+ 			} else {
+ 				atrb = TX_WHITE;
+ 			}
+-			text_putsa(x, y, asc_1E6DF, atrb);
++			text_putsa(x, y, "  ", atrb);
+ 			x += 2;
+ 			if(bomb_b_bft[row] & 0x0F) {
+ 				atrb = (TX_RED | TX_REVERSE);
+ 			} else {
+ 				atrb = TX_WHITE;
+ 			}
+-			text_putsa(x, y, asc_1E6DF, atrb);
++			text_putsa(x, y, "  ", atrb);
+ 			x += 2;
+ 		}
+ 	}
+diff --git a/th02_main.asm b/th02_main.asm
+index 8356c304..94445103 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -736,20 +736,6 @@ _POWER_TO_SHOT_LEVEL	db 0, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8, 8,
+ public _total_bombs_used
+ _total_bombs_used	db 0
+ 		db 0
+-public _BOMB_C_SPEEDS
+-_BOMB_C_SPEEDS	dw 4, 3, 3, 2, 2, 1, 1, 0, 0, 2, 3, 2, 1, 0, 1, 2, 1, 0, 0, 0, 2, 3, 3, 2, 3, 1, 2, 0, 0, 1, 1, 2, 2, 3, 1, 2, 3, 2, 1, 0, 1, 1, 2, 2, 3, 3, 4, 4
+-public _aBombs_bft
+-_aBombs_bft	db 'bombs.bft',0
+-public _aBomb1_pi
+-_aBomb1_pi	db 'bomb1.pi',0
+-public _aBomb3_pi
+-_aBomb3_pi	db 'bomb3.pi',0
+-public _aBomb2_pi
+-_aBomb2_pi	db 'bomb2.pi',0
+-public _aBomb1_bft
+-_aBomb1_bft	db 'bomb1.bft',0
+-public _asc_1E6DF
+-_asc_1E6DF	db '  ',0
+ 
+ 	.data?
+ 
