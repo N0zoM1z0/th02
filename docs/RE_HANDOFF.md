@@ -24,11 +24,16 @@ Decompiled beyond ReC98 so far (all byte-exact; cold run `session4-cold1`):
   player controls in `player.cpp`.
 - MAINE's game code is entirely C++.
 
-Still assembly in MAIN: DIALOG_TEXT before the pillars (stage 3 midboss and
-the Five Magic Stones, `sub_10E4F`/`sub_10E95`), `shots_hittest()` (own
-module `th02/main/hittest.asm`, see below), BOSS_5_TEXT before Mima (Rika,
-Meira, midbosses 1/2/x, Sigma), main_03__TEXT head (`mima_init` …
-`marisa_1AA60`), and ZUN code inside `_TEXT`.
+Since then also C++ and byte-exact: all of DIALOG_TEXT except
+`shots_hittest()` (stage 3 in `th02/stage3.cpp`), the stage enemy system
+(`th02/main/enemy/enemy.cpp`), stage 2 with Meira
+(`th02/main/boss/meira.cpp`), and the Extra Stage midboss and Sigma
+(`th02/main/boss/sigma.cpp`).
+
+Still assembly in MAIN: BOSS_5_TEXT stage 1 (`sub_134B6` … `rika_update`,
+before `meira.cpp`), `shots_hittest()` (own module `th02/main/hittest.asm`),
+main_03__TEXT head (`mima_init` … `marisa_1AA60`, plus `sub_1A6C5`), and ZUN
+code inside `_TEXT`.
 
 ## Loop
 
@@ -116,17 +121,30 @@ disassembly; `th02_asmedit.py` removes/exports procedures and data labels.
   patnum/from_option) need an explicit 16-bit write.
 - Struct copies from an initialized constant (`bomb_reimu_c()` speeds,
   `stage_loop()` scroll lines) are `T local = EXTERN_CONST;`.
+- Two statements `x = a; x += b;` into a register variable give
+  `mov si, a / add si, b`; one expression goes through AX.
+- A comparison assigned to a byte (`dir = (a < b);`) is computed in AX; a
+  ternary `(a < b) ? 1 : 0` uses AL.
+- `if(...) goto label;` and `if(...) continue;` both end the condition at a
+  jump label, which resets TCC's register and ES tracking. A nested `if`
+  keeps it.
+- Under `-a2`, a TU's switch tables are word-aligned relative to the TU
+  start, so a misaligned table means the TU starts at another function
+  (`stage2_lightning_update()` before Meira, the null callback before the
+  enemy code).
+- An `if`/`else if` chain with copy-pasted bodies compiles to one linear
+  compare sequence after cross-jumping; a `switch` with as many sparse cases
+  uses a binary search.
 - TCC's cross-jumping merges identical statement tails; write the natural
   duplicated code first. A jump into the middle of another branch needs `goto`
   (`mima_183D0`).
 
 ## Next useful actions
 
-1. DIALOG_TEXT backwards from `stones_12778`: `stones_update`, `stones_end`
-   and `stones_init` are read; the trailing `db 0` before `shots_hittest`
-   becomes word alignment of `hittest.asm`. `stones_init` passes an argument
-   through a nopcall into BOSS_5 (`sub_13ABB`).
-2. BOSS_5_TEXT backwards from `sub_17A55`; main_03__TEXT head.
-3. Merge each original code segment group into one physical segment (split
-   `th02_main.asm` into modules) to drop the remaining nopcall stand-ins.
-4. Whole-product identity: header size and relocation order.
+1. BOSS_5_TEXT stage 1 (stage 1 background particles `sub_134B6` …,
+   midboss 1, Rika) as one TU before `meira.cpp`.
+2. main_03__TEXT head and `sub_1A6C5`; `shots_hittest()`'s final reload.
+3. ZUN code inside `_TEXT` (`pfopen`, `mpn_put_8`, …).
+4. Merge each original code segment group into one physical segment
+   (split `th02_main.asm` into modules) to drop the nopcall stand-ins.
+5. Whole-product identity: header size and relocation order.

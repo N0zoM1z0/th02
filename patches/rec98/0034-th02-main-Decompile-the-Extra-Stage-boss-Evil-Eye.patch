@@ -1,0 +1,3517 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 22:11:09 +0100
+Subject: [PATCH] =?UTF-8?q?[th02/main]=20Decompile=20the=20Extra=20Stage?=
+ =?UTF-8?q?=20boss,=20Evil=20Eye=20=CE=A3?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A chain of if/else branches with copy-pasted bodies (sigma_162D3) compiles
+to one linear compare sequence after TCC cross-jumps the duplicates; a
+switch would use a binary search instead.
+---
+ Tupfile.lua              |    1 +
+ th02/main/boss/sigma.cpp | 1054 +++++++++++++++++
+ th02_main.asm            | 2367 ++------------------------------------
+ 3 files changed, 1142 insertions(+), 2280 deletions(-)
+ create mode 100644 th02/main/boss/sigma.cpp
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index 5019da2a..dcbe7588 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -557,6 +557,7 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/hud_ovrl.cpp",
+ 	"th02/bullet.cpp",
+ 	"th02/dialog.cpp",
++	"th02/main/boss/sigma.cpp",
+ 	"th02/main/enemy/enemy.cpp",
+ 	"th02/mima.cpp",
+ 	"th02/marisa.cpp",
+diff --git a/th02/main/boss/sigma.cpp b/th02/main/boss/sigma.cpp
+new file mode 100644
+index 00000000..4cf9b517
+--- /dev/null
++++ b/th02/main/boss/sigma.cpp
+@@ -0,0 +1,1054 @@
++/* ReC98
++ * -----
++ * Extra Stage boss: Evil Eye Σ
++ */
++
++#pragma option -zCBOSS_5_TEXT -zPmain_03 -G
++
++#include "platform.h"
++#include "x86real.h"
++#include "pc98.h"
++#include "libs/master.lib/master.hpp"
++#include "libs/master.lib/pc98_gfx.hpp"
++#include "th01/math/polar.hpp"
++#include "th02/v_colors.hpp"
++#include "th02/resident.hpp"
++#include "th02/core/globals.hpp"
++#include "th02/hardware/input.hpp"
++#include "th02/hardware/pages.hpp"
++#include "th02/math/randring.hpp"
++#include "th02/math/vector.hpp"
++#include "th02/snd/snd.h"
++#include "th02/main/circle.hpp"
++#include "th02/main/frames.hpp"
++#include "th02/main/playfld.hpp"
++#include "th02/main/score.hpp"
++#include "th02/main/scroll.hpp"
++#include "th02/main/slowdown.hpp"
++#include "th02/main/boss/boss.hpp"
++#include "th02/main/boss/bosses.hpp"
++#include "th02/main/bullet/bullet.hpp"
++#include "th02/main/dialog/dialog.hpp"
++#include "th02/main/player/player.hpp"
++#include "th02/main/stage/bonus.hpp"
++#include "th02/main/tile/tile.hpp"
++#include "th02/sprites/bullet16.h"
++
++extern "C" void MASTER_RET graph_scroll(
++	unsigned line1, unsigned adr1, unsigned adr2
++);
++
++extern screen_x_t shot_target_left;
++extern screen_y_t shot_target_top;
++extern uint8_t pillar_frames_new;
++extern int patnum_2064E;
++extern uint8_t byte_2066A;
++
++int pascal near shots_hittest(
++	screen_x_t left, screen_y_t top, pixel_t w, pixel_t h
++);
++void pascal near pillar_add(
++	screen_x_t left, screen_y_t top, int duration, int patnum
++);
++void sub_13ABB(char far *fn);
++void near sub_1A6C5(void);
++void near dialog_pre(void);
++void near dialog_post(void);
++void near dialog_script_extra_pre_intro_animate(void);
++void scoredat_extra_clear_save(void);
++int GameExecl(char *binary_fn);
++void shots_clear(void);
++
++// State
++// -----
++
++extern screen_x_t sigma_bullet_left;
++extern screen_y_t sigma_bullet_top;
++extern screen_point_t sigma_topleft;
++
++struct sigma_circle_t {
++	uint8_t flag; // 1 = growing sprite, 2..3 = expanding, 4 = vanishing
++	uint8_t frame;
++	screen_x_t center_x;
++	screen_y_t center_y;
++	pixel_t radius_max;
++	uint8_t cel;
++	uint8_t radius;
++};
++
++static const int SIGMA_CIRCLE_COUNT = 16;
++
++extern sigma_circle_t sigma_circles[SIGMA_CIRCLE_COUNT];
++extern uint8_t sigma_circle_frame_mask;
++extern int8_t sigma_circle_hitbox_shrink;
++
++extern uint8_t sigma_beam_w;
++extern uint8_t sigma_beam_vram_left;
++extern uint8_t sigma_beam_vram_right;
++extern screen_x_t sigma_beam_left;
++extern screen_x_t sigma_beam_right;
++extern uint8_t sigma_15D56_frames;
++extern int8_t sigma_15D56_velocity;
++extern int8_t sigma_15EF7_velocity;
++extern screen_x_t sigma_15F95_center_x;
++extern screen_y_t sigma_15F95_center_y;
++extern unsigned char sigma_15F95_angle;
++extern screen_x_t sigma_1619C_left;
++extern uint8_t sigma_1619C_round;
++extern int8_t sigma_pillar_i;
++extern screen_point_t sigma_16421_velocity;
++extern screen_x_t sigma_16421_left_1;
++extern screen_y_t sigma_16421_top;
++extern pixel_t sigma_16421_velocity_x_2;
++extern screen_x_t sigma_16421_left_2;
++extern int8_t sigma_165A5_velocity;
++extern unsigned char sigma_16650_angle;
++extern uint8_t sigma_phase;
++extern uint8_t sigma_patterns_done;
++extern uint8_t sigma_pattern;
++extern void (near *sigma_pattern_funcs[3])(void);
++extern int sigma_phase_damage;
++extern unsigned char sigma_ring_angle;
++
++struct sigma_pillar_offsets_t {
++	pixel_t v[5];
++};
++
++extern const sigma_pillar_offsets_t SIGMA_PILLAR_OFFSETS;
++extern char aStage5b1_bft[];
++extern char aStage5b2_bft[];
++extern char aBoss5_m[];
++extern char aMaine[];
++// -----
++
++int pascal near sigma_circle_add(
++	screen_x_t center_x, screen_y_t center_y, pixel_t radius_max
++)
++{
++	sigma_circle_t *p;
++	register int i;
++
++	p = sigma_circles;
++	if(
++		(center_x > 0) && (center_x < 444) &&
++		(center_y > 0) && (center_y < 400)
++	) {
++		for(i = 0; i < SIGMA_CIRCLE_COUNT; (i++, p++)) {
++			if(p->flag != 0) {
++				continue;
++			}
++			p->flag = 1;
++			p->frame = 0;
++			p->center_x = center_x;
++			p->center_y = center_y;
++			p->radius_max = radius_max;
++			p->cel = 26;
++			p->radius = 64;
++			snd_se_play(9);
++			return 0;
++		}
++	}
++	return 1;
++}
++
++void near sigma_circles_advance(void)
++{
++	sigma_circle_t *p;
++	int i;
++
++	p = sigma_circles;
++	for(i = 0; i < SIGMA_CIRCLE_COUNT; (i++, p++)) {
++		if(p->flag == 2) {
++			p->flag++;
++		}
++	}
++}
++
++void near sigma_circles_update_and_render(void)
++{
++	sigma_circle_t *p;
++	register int i;
++
++	p = sigma_circles;
++	for(i = 0; i < SIGMA_CIRCLE_COUNT; (i++, p++)) {
++		if(p->flag == 0) {
++			continue;
++		}
++		p->frame++;
++		if(p->flag == 1) {
++			if((p->frame & sigma_circle_frame_mask) == 0) {
++				p->cel++;
++				if(p->cel >= 34) {
++					p->flag++;
++					snd_se_play(3);
++				}
++				p->frame = 0;
++				p->radius -= 8;
++				grcg_setcolor(GC_RMW, V_WHITE);
++				grcg_circle(p->center_x, p->center_y, p->radius);
++				grcg_off();
++			}
++			if(p->flag == 1) {
++				super_put_rect((p->center_x - 16), (p->center_y - 16), p->cel);
++			}
++		} else if(p->flag == 3) {
++			if(page_back == (i & 1)) {
++				grcg_setcolor(GC_RMW, V_WHITE);
++				grcg_circlefill(p->center_x, p->center_y, p->radius);
++				grcg_off();
++				if(p->radius < p->radius_max) {
++					p->radius += 16;
++				}
++			}
++			if(p->frame > 32) {
++				p->flag++;
++				p->frame = 0;
++				p->radius_max = p->radius;
++				p->radius = 8;
++			}
++			if(
++				(
++					((p->center_x - p->radius) + sigma_circle_hitbox_shrink) <
++					player_left_on_page[page_front]
++				) && (
++					(((p->center_x + p->radius) - sigma_circle_hitbox_shrink) - 32) >
++					player_left_on_page[page_front]
++				) && (
++					((p->center_y - p->radius) + sigma_circle_hitbox_shrink) <
++					player_top_on_page[page_front]
++				) && (
++					(((p->center_y + p->radius) - sigma_circle_hitbox_shrink) - 32) >
++					player_top_on_page[page_front]
++				)
++			) {
++				player_is_hit = true;
++			}
++		} else if(p->flag == 4) {
++			if(page_back == (i & 1)) {
++				grcg_setcolor(GC_RMW, V_WHITE);
++				grcg_circlefill(p->center_x, p->center_y, p->radius_max);
++				grcg_off();
++				grcg_setcolor(GC_RMW, 0);
++				grcg_circlefill(p->center_x, p->center_y, p->radius);
++				grcg_off();
++				if(p->radius >= p->radius_max) {
++					p->flag = 0;
++				} else {
++					p->radius += 16;
++				}
++			}
++		}
++	}
++}
++
++void near sigma_put(void)
++{
++	super_put_rect(sigma_topleft.x, sigma_topleft.y, patnum_2064E);
++	super_put_rect((sigma_topleft.x + 64), sigma_topleft.y, (patnum_2064E + 1));
++}
++
++void near sigma_hittest_and_put(void)
++{
++	int damage;
++	int patnum;
++
++	patnum = patnum_2064E;
++	if(!byte_2066A) {
++		if((damage = shots_hittest(
++			(*boss_left_on_back_page + 36), (*boss_top_on_back_page + 32), 56, 32
++		)) != 0) {
++			patnum_2064E = 130;
++			boss_damage += damage;
++		}
++		if(
++			(player_left_on_page[page_front] > (sigma_topleft.x + 8)) &&
++			(player_left_on_page[page_front] < (sigma_topleft.x + 88)) &&
++			(player_top_on_page[page_front] > sigma_topleft.y) &&
++			(player_top_on_page[page_front] < (sigma_topleft.y + 64))
++		) {
++			player_is_hit = true;
++		}
++	}
++	sigma_put();
++	patnum_2064E = patnum;
++}
++
++void sigma_bg_render(void)
++{
++	int unused = 8;
++
++	boss_left_on_back_page = &boss_left_on_page[page_back];
++	boss_top_on_back_page = &boss_top_on_page[page_back];
++	*boss_left_on_back_page = boss_left_on_page[page_front];
++	*boss_top_on_back_page = boss_top_on_page[page_front];
++	egc_off();
++	grcg_setcolor(GC_RMW, 0);
++	grcg_byteboxfill_x(
++		PLAYFIELD_VRAM_LEFT,
++		PLAYFIELD_TOP,
++		(PLAYFIELD_VRAM_RIGHT - 1),
++		(PLAYFIELD_BOTTOM - 1)
++	);
++	grcg_off();
++	sigma_circles_advance();
++}
++
++#define sigma_beam_hittest() { \
++	if( \
++		(player_left_on_page[page_front] > sigma_beam_left) && \
++		(player_left_on_page[page_front] < sigma_beam_right) \
++	) { \
++		player_is_hit = true; \
++	} \
++}
++
++#define sigma_beam_put(col) { \
++	grcg_setcolor(GC_RMW, col); \
++	grcg_byteboxfill_x( \
++		sigma_beam_vram_left, 16, sigma_beam_vram_right, (PLAYFIELD_BOTTOM - 1) \
++	); \
++	grcg_off(); \
++}
++
++int near sigma_defeat_animate(void)
++{
++	register int i;
++
++	if(boss_phase_frame < 10) {
++		sigma_put();
++		return 0;
++	}
++	if(boss_phase_frame == 10) {
++		sigma_beam_w = 8;
++		sigma_put();
++		snd_se_play(9);
++	} else if(boss_phase_frame < 90) {
++		sigma_put();
++		if(page_back == 0) {
++			grcg_setcolor(GC_RMW, V_WHITE);
++			grcg_circlefill((sigma_topleft.x + 64), (sigma_topleft.y + 64), 24);
++			grcg_off();
++		}
++		if((boss_phase_frame >= 50) && (page_back != 0)) {
++			grcg_setcolor(GC_RMW, V_WHITE);
++			grcg_vline(
++				(sigma_topleft.x + 64), PLAYFIELD_TOP, (PLAYFIELD_BOTTOM - 1)
++			);
++			grcg_off();
++		}
++		if(boss_phase_frame == 89) {
++			snd_se_play(3);
++		}
++	} else if(boss_phase_frame < 100) {
++		grcg_setcolor(GC_RMW, V_WHITE);
++		grcg_byteboxfill_x(
++			(((sigma_topleft.x + 64) - sigma_beam_w) / 8),
++			16,
++			((sigma_beam_w + sigma_topleft.x + 64) / 8),
++			(PLAYFIELD_BOTTOM - 1)
++		);
++		grcg_off();
++		if(
++			(((sigma_topleft.x + 56) - sigma_beam_w) <
++			player_left_on_page[page_front]) &&
++			(player_left_on_page[page_front] <
++			(sigma_beam_w + sigma_topleft.x + 40))
++		) {
++			player_is_hit = true;
++		}
++		sigma_beam_w += 8;
++		sigma_put();
++	} else if(boss_phase_frame == 100) {
++		sigma_beam_left = ((sigma_topleft.x + 56) - sigma_beam_w);
++		sigma_beam_right = (sigma_beam_w + sigma_topleft.x + 40);
++		sigma_beam_vram_left = (((sigma_topleft.x + 64) - sigma_beam_w) / 8);
++		sigma_beam_vram_right = (((sigma_beam_w + sigma_topleft.x + 64) / 8) - 1);
++		patnum_2064E = 134;
++	} else if(boss_phase_frame <= 140) {
++		sigma_beam_put(V_WHITE);
++		sigma_put();
++		sigma_beam_hittest();
++	} else if(boss_phase_frame < 180) {
++		sigma_beam_put(V_WHITE);
++		if((boss_phase_frame % 10) == 0) {
++			patnum_2064E += 2;
++		}
++		sigma_put();
++		sigma_beam_hittest();
++		i = (boss_phase_frame & 1);
++		graph_scroll((RES_Y - scroll_line), ((scroll_line * 40) + i), i);
++		slowdown_factor = 2;
++	} else if(boss_phase_frame <= 220) {
++		slowdown_factor = 1;
++		sigma_beam_put(V_WHITE);
++		sigma_beam_hittest();
++	} else if(boss_phase_frame < 224) {
++		sigma_beam_put(0);
++	} else {
++		return 1;
++	}
++	return 0;
++}
++
++#define player_left_of_center() \
++	(player_topleft.x < (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - (PLAYER_W / 2)))
++
++#define sigma_15D56_pellet_add(angle) { \
++	bullets_add_pellet( \
++		(randring2_next8_and(0x7F) + sigma_topleft.x), \
++		(sigma_topleft.y + 64), \
++		angle, \
++		BG_1, \
++		(randring2_next8_and(0x1F) + ((1 << 4) + 14)) \
++	); \
++}
++
++void near sigma_15D56(void)
++{
++	unsigned char angle;
++	register int i;
++
++	if(boss_phase_frame < 20) {
++		return;
++	}
++	if(boss_phase_frame == 20) {
++		sigma_15D56_frames = 0;
++		sigma_15D56_velocity = (player_left_of_center() ? 1 : -1);
++	}
++	if((boss_phase_frame % 4) == 0) {
++		snd_se_play(3);
++	}
++	if(boss_phase_frame < 148) {
++		*boss_left_on_back_page += sigma_15D56_velocity;
++		if(boss_phase_frame & 1) {
++			sigma_15D56_pellet_add(0x40);
++		}
++	} else if(boss_phase_frame < 212) {
++		*boss_left_on_back_page -= (sigma_15D56_velocity * 4);
++		if(boss_phase_frame & 1) {
++			sigma_15D56_pellet_add(0x40);
++		}
++	} else if(boss_phase_frame < 340) {
++		*boss_left_on_back_page += sigma_15D56_velocity;
++		if(boss_phase_frame & 1) {
++			sigma_15D56_pellet_add(0x40);
++		}
++	} else if(boss_phase_frame < 440) {
++		sigma_15D56_frames++;
++		angle = (
++			(randring2_next8() % (sigma_15D56_frames * 2)) +
++			(0x40 - sigma_15D56_frames)
++		);
++		if((boss_phase_frame & 3) == 0) {
++			for(i = 0; i < 3; i++) {
++				sigma_15D56_pellet_add(angle);
++			}
++		}
++	} else {
++		boss_phase_frame = 0;
++	}
++}
++
++void near sigma_15E84(void)
++{
++	if(boss_phase_frame < 100) {
++		return;
++	}
++	if(boss_phase_frame == 100) {
++		sigma_circle_frame_mask = 7;
++		sigma_circle_hitbox_shrink = 4;
++		sigma_circle_add(128, 320, 64);
++	} else if(boss_phase_frame == 120) {
++		sigma_circle_add(320, 320, 64);
++	} else if(
++		(boss_phase_frame > 130) &&
++		(boss_phase_frame < 150) &&
++		((boss_phase_frame % 4) == 0)
++	) {
++		bullets_add_pellet(
++			sigma_bullet_left,
++			sigma_bullet_top,
++			0x00,
++			BG_5_SPREAD_MEDIUM_AIMED,
++			((7 << 4) + 8)
++		);
++	}
++	if(boss_phase_frame > 200) {
++		boss_phase_frame = 0;
++	}
++}
++
++int near sigma_15EF7(void)
++{
++	if(boss_phase_frame < 50) {
++		return 1;
++	}
++	if(boss_phase_frame == 50) {
++		sigma_15EF7_velocity = (player_left_of_center() ? 1 : -1);
++	}
++	if(boss_phase_frame < 114) {
++		*boss_left_on_back_page += sigma_15EF7_velocity;
++		(*boss_top_on_back_page)++;
++	} else if(boss_phase_frame < 242) {
++		*boss_left_on_back_page -= sigma_15EF7_velocity;
++	} else if(boss_phase_frame < 306) {
++		*boss_left_on_back_page += sigma_15EF7_velocity;
++		(*boss_top_on_back_page)--;
++	} else {
++		boss_phase_frame = 0;
++	}
++	return 0;
++}
++
++void near sigma_15F6F(void)
++{
++	if(sigma_15EF7()) {
++		return;
++	}
++	if((boss_phase_frame & 0x1F) == 0) {
++		bullets_add_pellet(
++			sigma_bullet_left,
++			sigma_bullet_top,
++			randring2_next8(),
++			BG_32_RING,
++			((5 << 4) + 5)
++		);
++	}
++}
++
++#define sigma_15F95_circle_put(col) { \
++	grcg_setcolor(GC_RMW, col); \
++	grcg_circle(sigma_15F95_center_x, sigma_15F95_center_y, 112); \
++	grcg_off(); \
++}
++
++void near sigma_15F95(void)
++{
++	unsigned char angle;
++	register screen_x_t left;
++	register screen_y_t top;
++
++	if(boss_phase_frame < 50) {
++		return;
++	}
++	if(boss_phase_frame == 50) {
++		snd_se_play(9);
++	}
++	if(boss_phase_frame < 100) {
++		patnum_2064E = ((page_back * 4) + 128);
++		return;
++	}
++	if(boss_phase_frame == 100) {
++		sigma_15F95_center_x = (player_topleft.x + 16);
++		sigma_15F95_center_y = (player_topleft.y + 16);
++		sigma_circle_frame_mask = 3;
++		sigma_circle_hitbox_shrink = -4;
++		sigma_15F95_angle = 0x00;
++		patnum_2064E = 128;
++	}
++	if(boss_phase_frame < 130) {
++		if((boss_phase_frame % 8) == 0) {
++			grcg_setcolor(GC_RMW, V_WHITE);
++			grcg_circle(sigma_15F95_center_x, sigma_15F95_center_y, 112);
++		} else if((boss_phase_frame % 8) == 2) {
++			grcg_setcolor(GC_RMW, 0);
++			grcg_circle(sigma_15F95_center_x, sigma_15F95_center_y, 112);
++		}
++		grcg_off();
++	} else if(boss_phase_frame < 450) {
++		if(page_back == 0) {
++			sigma_15F95_circle_put(V_WHITE);
++		}
++		if(boss_phase_frame >= 150) {
++			if((boss_phase_frame % 12) == 0) {
++				left = polar_x_fast(sigma_15F95_center_x, 112, sigma_15F95_angle);
++				top = polar_y_fast(sigma_15F95_center_y, 112, sigma_15F95_angle);
++				sigma_circle_add(left, top, 24);
++				angle = (sigma_15F95_angle + 0x80);
++				left = polar_x_fast(sigma_15F95_center_x, 112, angle);
++				top = polar_y_fast(sigma_15F95_center_y, 112, angle);
++				sigma_circle_add(left, top, 24);
++				sigma_15F95_angle -= 0x10;
++			}
++			if((boss_phase_frame >= 200) && ((boss_phase_frame & 0xF) == 0)) {
++				bullets_add_pellet(
++					sigma_bullet_left,
++					sigma_bullet_top,
++					randring2_next8(),
++					BG_32_RING,
++					(5 << 4)
++				);
++			}
++		}
++	} else if(page_back == 0) {
++		sigma_15F95_circle_put(0);
++		boss_phase_frame = 0;
++	}
++}
++
++void near sigma_16176(void)
++{
++	if(sigma_15EF7()) {
++		return;
++	}
++	if((boss_phase_frame & 7) == 0) {
++		bullets_add_pellet(
++			sigma_bullet_left,
++			sigma_bullet_top,
++			randring2_next8(),
++			BG_16_RING,
++			((3 << 4) + 2)
++		);
++	}
++}
++
++void near sigma_1619C(void)
++{
++	if(boss_phase_frame < 50) {
++		return;
++	}
++	if(boss_phase_frame == 50) {
++		snd_se_play(9);
++	}
++	if(boss_phase_frame < 100) {
++		patnum_2064E = ((page_back * 4) + 128);
++		return;
++	}
++	if(boss_phase_frame == 100) {
++		patnum_2064E = 128;
++		sigma_1619C_left = PLAYFIELD_LEFT;
++		sigma_1619C_round = 0;
++		bullet_special.u3.turns_max = 1;
++	}
++	if((boss_phase_frame & 0xF) == 0) {
++		bullets_add_16x16(
++			sigma_1619C_left,
++			(PLAYFIELD_TOP + 8),
++			0x40,
++			BSM_BOUNCE_LEFT_RIGHT_TOP_BOTTOM,
++			(sigma_1619C_round + PAT_BULLET16_BILLIARD_BALL_RED),
++			(4 << 4)
++		);
++		bullets_add_16x16(
++			((PLAYFIELD_RIGHT + BULLET16_W) - sigma_1619C_left),
++			(PLAYFIELD_TOP + 8),
++			0x40,
++			BSM_BOUNCE_LEFT_RIGHT_TOP_BOTTOM,
++			(sigma_1619C_round + PAT_BULLET16_BILLIARD_BALL_RED),
++			(4 << 4)
++		);
++		sigma_1619C_left += BULLET16_W;
++		if(sigma_1619C_left == (PLAYFIELD_LEFT + (PLAYFIELD_W / 2))) {
++			pillar_frames_new = 32;
++			pillar_add((sigma_topleft.x + 60), sigma_bullet_top, 1, 0x6F);
++			pillar_frames_new = 48;
++			pillar_add((sigma_topleft.x + 44), sigma_bullet_top, 1, 0x6F);
++			pillar_add((sigma_topleft.x + 76), sigma_bullet_top, 1, 0x6F);
++			pillar_frames_new = 100;
++			pillar_add((sigma_topleft.x + 28), sigma_bullet_top, 1, 0x6F);
++			pillar_add((sigma_topleft.x + 92), sigma_bullet_top, 1, 0x6F);
++			pillar_frames_new = 16;
++		}
++		if(sigma_1619C_left >= (PLAYFIELD_RIGHT + BULLET16_W)) {
++			sigma_1619C_left = PLAYFIELD_LEFT;
++			sigma_1619C_round++;
++			if(sigma_1619C_round >= 2) {
++				boss_phase_frame = 0;
++			}
++		}
++	}
++}
++
++void near sigma_162D3(void)
++{
++	sigma_pillar_offsets_t offsets = SIGMA_PILLAR_OFFSETS;
++	unsigned char angle;
++	int i;
++
++	if(sigma_15EF7()) {
++		return;
++	}
++	if(boss_phase_frame == 100) {
++		sigma_pillar_i = 0;
++	} else if(boss_phase_frame == 114) {
++		pillar_add(
++			(offsets.v[sigma_pillar_i++] + sigma_topleft.x), sigma_bullet_top, 1, 0x6F
++		);
++	} else if(boss_phase_frame == 118) {
++		pillar_add(
++			(offsets.v[sigma_pillar_i++] + sigma_topleft.x), sigma_bullet_top, 1, 0x6F
++		);
++		pillar_add(
++			(offsets.v[sigma_pillar_i++] + sigma_topleft.x), sigma_bullet_top, 1, 0x6F
++		);
++	} else if(boss_phase_frame == 122) {
++		pillar_add(
++			(offsets.v[sigma_pillar_i++] + sigma_topleft.x), sigma_bullet_top, 1, 0x6F
++		);
++		pillar_add(
++			(offsets.v[sigma_pillar_i] + sigma_topleft.x), sigma_bullet_top, 1, 0x6F
++		);
++		sigma_pillar_i = 0;
++	} else if(boss_phase_frame == 242) {
++		pillar_add(
++			(offsets.v[sigma_pillar_i++] + sigma_topleft.x), sigma_bullet_top, 1, 0x6F
++		);
++	} else if(boss_phase_frame == 246) {
++		pillar_add(
++			(offsets.v[sigma_pillar_i++] + sigma_topleft.x), sigma_bullet_top, 1, 0x6F
++		);
++		pillar_add(
++			(offsets.v[sigma_pillar_i++] + sigma_topleft.x), sigma_bullet_top, 1, 0x6F
++		);
++	} else if(boss_phase_frame == 250) {
++		pillar_add(
++			(offsets.v[sigma_pillar_i++] + sigma_topleft.x), sigma_bullet_top, 1, 0x6F
++		);
++		pillar_add(
++			(offsets.v[sigma_pillar_i] + sigma_topleft.x), sigma_bullet_top, 1, 0x6F
++		);
++		sigma_pillar_i = 0;
++	} else if(
++		(boss_phase_frame > 120) &&
++		(boss_phase_frame < 240) &&
++		((boss_phase_frame & 0xF) == 0)
++	) {
++		for((angle = 0x90, i = 0); angle < 0xF0; (angle += 0x10, i++)) {
++			bullets_add_16x16(
++				sigma_bullet_left,
++				sigma_bullet_top,
++				angle,
++				BSM_BOUNCE_LEFT_RIGHT_TOP_BOTTOM,
++				((i % 2) + PAT_BULLET16_BILLIARD_BALL_RED),
++				((3 << 4) + 12)
++			);
++		}
++	}
++}
++
++#define player_center_x() (player_topleft.x + 16)
++#define player_center_y() (player_topleft.y + 16)
++
++void near sigma_16421(void)
++{
++	int first_failed;
++
++	if(boss_phase_frame < 50) {
++		return;
++	}
++	if(boss_phase_frame == 50) {
++		snd_se_play(9);
++	}
++	if(boss_phase_frame < 100) {
++		patnum_2064E = ((page_back * 4) + 128);
++		return;
++	}
++	if(boss_phase_frame == 100) {
++		vector2_between_plus(
++			sigma_bullet_left,
++			sigma_bullet_top,
++			player_center_x(),
++			player_center_y(),
++			0x00,
++			sigma_16421_velocity.x,
++			sigma_16421_velocity.y,
++			48
++		);
++		sigma_16421_velocity_x_2 = -sigma_16421_velocity.x;
++		patnum_2064E = 128;
++		sigma_16421_left_1 = sigma_bullet_left;
++		sigma_16421_left_2 = sigma_bullet_left;
++		sigma_circle_hitbox_shrink = -4;
++		sigma_circle_frame_mask = 3;
++		sigma_16421_top = sigma_bullet_top;
++	}
++	if((boss_phase_frame & 7) == 0) {
++		first_failed = sigma_circle_add(sigma_16421_left_1, sigma_16421_top, 48);
++		if(
++			sigma_circle_add(sigma_16421_left_2, sigma_16421_top, 48) &&
++			first_failed
++		) {
++			boss_phase_frame = 0;
++		}
++		sigma_16421_left_1 += sigma_16421_velocity.x;
++		sigma_16421_left_2 += sigma_16421_velocity_x_2;
++		sigma_16421_top += sigma_16421_velocity.y;
++		if(player_center_x() > sigma_16421_left_1) {
++			sigma_16421_left_1 += 16;
++		} else if(player_center_x() < sigma_16421_left_1) {
++			sigma_16421_left_1 -= 16;
++		}
++		if(player_center_x() > sigma_16421_left_2) {
++			sigma_16421_left_2 -= 16;
++		} else if(player_center_x() < sigma_16421_left_2) {
++			sigma_16421_left_2 += 16;
++		}
++		bullets_add_pellet(
++			sigma_bullet_left,
++			sigma_bullet_top,
++			randring2_next8(),
++			BG_16_RING,
++			((3 << 4) + 12)
++		);
++	}
++}
++
++void near sigma_16555(void)
++{
++	if(sigma_15EF7()) {
++		return;
++	}
++	if(boss_phase_frame == 50) {
++		sigma_circle_frame_mask = 7;
++	}
++	if((boss_phase_frame & 0x3F) == 32) {
++		sigma_circle_add(player_center_x(), player_center_y(), 48);
++	}
++	if((boss_phase_frame & 0x3F) == 0) {
++		bullets_add_pellet(
++			sigma_bullet_left,
++			sigma_bullet_top,
++			randring2_next8(),
++			BG_32_RING,
++			((3 << 4) + 12)
++		);
++	}
++}
++
++int near sigma_165A5(void)
++{
++	if(boss_phase_frame < 50) {
++		return 1;
++	}
++	if(boss_phase_frame == 50) {
++		sigma_165A5_velocity = (player_left_of_center() ? 2 : -2);
++	}
++	if(boss_phase_frame < 130) {
++		*boss_left_on_back_page += sigma_165A5_velocity;
++	} else if(boss_phase_frame < 290) {
++		*boss_left_on_back_page -= sigma_165A5_velocity;
++	} else if(boss_phase_frame < 370) {
++		*boss_left_on_back_page += sigma_165A5_velocity;
++	} else {
++		boss_phase_frame = 0;
++	}
++	return 0;
++}
++
++void near sigma_16606(void)
++{
++	if(sigma_165A5()) {
++		return;
++	}
++	if(boss_phase_frame == 50) {
++		sigma_circle_frame_mask = 7;
++	}
++	if((boss_phase_frame & 0x3F) == 0) {
++		sigma_circle_add(player_center_x(), player_center_y(), 48);
++	}
++	if((boss_phase_frame & 7) == 0) {
++		bullets_add_pellet(
++			sigma_bullet_left,
++			sigma_bullet_top,
++			0x00,
++			BG_2_SPREAD_ULTRAWIDE_AIMED,
++			((4 << 4) + 6)
++		);
++	}
++}
++
++void near sigma_16650(void)
++{
++	if(sigma_165A5()) {
++		return;
++	}
++	if(boss_phase_frame == 50) {
++		sigma_16650_angle = 0x00;
++	}
++	if((boss_phase_frame & 7) == 0) {
++		bullets_add_16x16(
++			sigma_bullet_left,
++			sigma_bullet_top,
++			sigma_16650_angle,
++			BG_8_RING,
++			PAT_BULLET16_BALL,
++			(5 << 4)
++		);
++		sigma_16650_angle += 0x08;
++	}
++}
++
++void near sigma_1668E(void)
++{
++	if(sigma_165A5()) {
++		return;
++	}
++	if(boss_phase_frame == 50) {
++		sigma_circle_frame_mask = 7;
++	}
++	if((boss_phase_frame & 0x1F) == 0) {
++		sigma_circle_add(player_center_x(), player_center_y(), 48);
++	}
++	if((boss_phase_frame & 0x1F) == 16) {
++		bullets_add_pellet(
++			sigma_bullet_left,
++			sigma_bullet_top,
++			randring2_next8(),
++			BG_16_RING,
++			((3 << 4) + 12)
++		);
++	}
++}
++
++void sigma_patterns_run(int pattern_count)
++{
++	switch(sigma_pattern) {
++	case 0:	sigma_pattern_funcs[0]();	break;
++	case 1:	sigma_pattern_funcs[1]();	break;
++	case 2:	sigma_pattern_funcs[2]();	break;
++	}
++	if(boss_phase_frame == 0) {
++		sigma_pattern++;
++		if(sigma_pattern >= pattern_count) {
++			sigma_pattern = 0;
++			sigma_patterns_done = true;
++		}
++		if(boss_damage >= sigma_phase_damage) {
++			boss_damage = 0;
++			sigma_phase++;
++			sigma_pattern = 0;
++			sigma_patterns_done = false;
++		}
++	}
++}
++
++#define sigma_phase_start(f0, f1) { \
++	sigma_pattern = 0; \
++	boss_phase_frame = 0; \
++	sigma_phase++; \
++	sigma_patterns_done = false; \
++	sigma_pattern_funcs[0] = f0; \
++	sigma_pattern_funcs[1] = f1; \
++}
++
++int sigma_update(void)
++{
++	unsigned char angle;
++	register int i;
++
++	sigma_topleft.x = *boss_left_on_back_page;
++	sigma_topleft.y = *boss_top_on_back_page;
++	sigma_bullet_left = (sigma_topleft.x + 60);
++	sigma_bullet_top = (sigma_topleft.y + 60);
++	boss_phase_frame++;
++	shot_target_left = sigma_bullet_left;
++	shot_target_top = sigma_bullet_top;
++	if(!(stage_frame & 1)) {
++		sigma_ring_angle += 8;
++		grcg_setcolor(GC_RMW, 4);
++		for((i = 0, angle = sigma_ring_angle); i < 2; (i++, angle += 0x80)) {
++			circle_dots_put(224, 200, angle, ((reduce_effects * 14) + 2));
++		}
++		grcg_off();
++	}
++	if(byte_2066A) {
++		if(sigma_defeat_animate()) {
++			return 2;
++		}
++		goto circles;
++	}
++	if(sigma_phase == 0) {
++		if(boss_phase_frame > 50) {
++			sigma_phase_start(sigma_15D56, sigma_15E84);
++			sigma_pattern_funcs[2] = sigma_15F6F;
++			sigma_phase_damage = 1800;
++		}
++	} else if(sigma_phase == 1) {
++		sigma_patterns_run(3);
++	} else if(sigma_phase == 2) {
++		sigma_phase_start(sigma_15F95, sigma_16176);
++		sigma_phase_damage = 1800;
++	} else if(sigma_phase == 3) {
++		sigma_patterns_run(2);
++	} else if(sigma_phase == 4) {
++		sigma_phase_start(sigma_1619C, sigma_162D3);
++		sigma_phase_damage = 1800;
++	} else if(sigma_phase == 5) {
++		sigma_patterns_run(2);
++	} else if(sigma_phase == 6) {
++		sigma_phase_start(sigma_16421, sigma_16555);
++		sigma_phase_damage = 1800;
++	} else if(sigma_phase == 7) {
++		sigma_patterns_run(2);
++	} else if(sigma_phase == 8) {
++		sigma_phase_start(sigma_16606, sigma_16650);
++		sigma_pattern_funcs[2] = sigma_1668E;
++		sigma_phase_damage = 5000;
++	} else if(sigma_phase == 9) {
++		sigma_patterns_run(3);
++		if(boss_damage >= 1300) {
++			byte_2066A = true;
++			score += 300000;
++			boss_phase_frame = 0;
++		}
++	}
++	sigma_topleft.x = *boss_left_on_back_page;
++	sigma_topleft.y = *boss_top_on_back_page;
++	sigma_hittest_and_put();
++	sigma_frame++;
++
++circles:
++	sigma_circles_update_and_render();
++	return 1;
++}
++
++void sigma_init(void)
++{
++	sub_1A6C5();
++	tile_mode = TM_NONE;
++	dialog_pre();
++	super_clean(128, 192);
++	super_patnum = 128;
++	super_entry_bfnt(aStage5b1_bft);
++	super_entry_bfnt(aStage5b2_bft);
++	grc_setclip(PLAYFIELD_LEFT, 0, PLAYFIELD_RIGHT, (RES_Y - 1));
++	dialog_script_extra_pre_intro_animate();
++	boss_left_on_page[0] = (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - 64);
++	boss_left_on_page[1] = (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - 64);
++	sigma_topleft.x = (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - 64);
++	boss_top_on_page[0] = (PLAYFIELD_TOP + 32);
++	boss_top_on_page[1] = (PLAYFIELD_TOP + 32);
++	sigma_topleft.y = (PLAYFIELD_TOP + 32);
++	boss_damage = 0;
++	boss_phase_frame = 0;
++	patnum_2064E = 128;
++	sigma_phase = 0;
++	sigma_circle_frame_mask = 7;
++	asm { nop; push cs; call near ptr bullets_clear; }
++	shots_clear();
++	palette_white_out(1);
++	sigma_put();
++	asm {
++		push	ds
++		push	offset aBoss5_m
++		nop
++		push	cs
++		call	near ptr sub_13ABB
++		add 	sp, 4
++	}
++	palette_white_in(1);
++	dialog_script_generic_part_animate(DS_PREBOSS);
++	dialog_post();
++}
++
++void sigma_end(void)
++{
++	dialog_pre();
++	dialog_script_generic_part_animate(DS_POSTBOSS);
++	stage_extra_clear_bonus_animate();
++	key_delay();
++	resident->stage = 0x7F;
++	resident->score = ((score * 10) + resident->continues_used);
++	scoredat_extra_clear_save();
++	GameExecl(aMaine);
++}
+diff --git a/th02_main.asm b/th02_main.asm
+index 64e61c7a..309a41ff 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -4770,2232 +4770,10 @@ loc_155C0:
+ 		pop	bp
+ 		retf
+ @midbossx_update_and_render$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_155C5	proc near
+-
+-var_4		= dword	ptr -4
+-arg_0		= word ptr  4
+-arg_2		= word ptr  6
+-arg_4		= word ptr  8
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		push	si
+-		push	di
+-		mov	di, [bp+arg_4]
+-		mov	word ptr [bp+var_4+2], ds
+-		mov	word ptr [bp+var_4], 7A7Ch
+-		or	di, di
+-		jle	short loc_1563C
+-		cmp	di, 1BCh
+-		jge	short loc_1563C
+-		cmp	[bp+arg_2], 0
+-		jle	short loc_1563C
+-		cmp	[bp+arg_2], 190h
+-		jge	short loc_1563C
+-		xor	si, si
+-		jmp	short loc_15637
+-; ---------------------------------------------------------------------------
+-
+-loc_155F3:
+-		les	bx, [bp+var_4]
+-		cmp	byte ptr es:[bx], 0
+-		jnz	short loc_15632
+-		les	bx, [bp+var_4]
+-		mov	byte ptr es:[bx], 1
+-		mov	byte ptr es:[bx+1], 0
+-		mov	es:[bx+2], di
+-		mov	ax, [bp+arg_2]
+-		mov	es:[bx+4], ax
+-		mov	ax, [bp+arg_0]
+-		mov	es:[bx+6], ax
+-		mov	byte ptr es:[bx+8], 1Ah
+-		mov	byte ptr es:[bx+9], 40h
+-		call	_snd_se_play c, 9
+-		xor	ax, ax
+-		jmp	short loc_1563F
+-; ---------------------------------------------------------------------------
+-
+-loc_15632:
+-		inc	si
+-		add	word ptr [bp+var_4], 0Ah
+-
+-loc_15637:
+-		cmp	si, 10h
+-		jl	short loc_155F3
+-
+-loc_1563C:
+-		mov	ax, 1
+-
+-loc_1563F:
+-		pop	di
+-		pop	si
+-		leave
+-		retn	6
+-sigma_155C5	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_15645	proc near
+-
+-var_4		= dword	ptr -4
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		mov	word ptr [bp+var_4+2], ds
+-		mov	word ptr [bp+var_4], 7A7Ch
+-		xor	ax, ax
+-		jmp	short loc_15668
+-; ---------------------------------------------------------------------------
+-
+-loc_15657:
+-		les	bx, [bp+var_4]
+-		cmp	byte ptr es:[bx], 2
+-		jnz	short loc_15663
+-		inc	byte ptr es:[bx]
+-
+-loc_15663:
+-		inc	ax
+-		add	word ptr [bp+var_4], 0Ah
+-
+-loc_15668:
+-		cmp	ax, 10h
+-		jl	short loc_15657
+-		leave
+-		retn
+-sigma_15645	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_1566F	proc near
+-
+-var_4		= dword	ptr -4
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		push	si
+-		mov	word ptr [bp+var_4+2], ds
+-		mov	word ptr [bp+var_4], 7A7Ch
+-		xor	si, si
+-		jmp	loc_158D2
+-; ---------------------------------------------------------------------------
+-
+-loc_15683:
+-		les	bx, [bp+var_4]
+-		cmp	byte ptr es:[bx], 0
+-		jz	loc_158CD
+-		les	bx, [bp+var_4]
+-		inc	byte ptr es:[bx+1]
+-		cmp	byte ptr es:[bx], 1
+-		jnz	loc_15721
+-		mov	al, byte_2558C
+-		test	es:[bx+1], al
+-		jnz	short loc_156F7
+-		inc	byte ptr es:[bx+8]
+-		cmp	byte ptr es:[bx+8], 22h	; '"'
+-		jb	short loc_156BE
+-		inc	byte ptr es:[bx]
+-		call	_snd_se_play c, 3
+-
+-loc_156BE:
+-		les	bx, [bp+var_4]
+-		mov	byte ptr es:[bx+1], 0
+-		mov	al, es:[bx+9]
+-		add	al, 0F8h
+-		mov	es:[bx+9], al
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + V_WHITE
+-		les	bx, [bp+var_4]
+-		push	word ptr es:[bx+2]
+-		push	word ptr es:[bx+4]
+-		mov	al, es:[bx+9]
+-		mov	ah, 0
+-		push	ax
+-		call	grcg_circle
+-		call	grcg_off
+-
+-loc_156F7:
+-		les	bx, [bp+var_4]
+-		cmp	byte ptr es:[bx], 1
+-		jnz	loc_158CD
+-		mov	ax, es:[bx+2]
+-		add	ax, -16
+-		push	ax
+-		mov	ax, es:[bx+4]
+-		add	ax, -16
+-		push	ax
+-		mov	al, es:[bx+8]
+-		mov	ah, 0
+-		push	ax
+-		call	super_put_rect
+-		jmp	loc_158CD
+-; ---------------------------------------------------------------------------
+-
+-loc_15721:
+-		les	bx, [bp+var_4]
+-		cmp	byte ptr es:[bx], 3
+-		jnz	loc_15849
+-		mov	al, _page_back
+-		mov	ah, 0
+-		mov	dx, si
+-		and	dx, 1
+-		cmp	ax, dx
+-		jnz	short loc_1577A
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + V_WHITE
+-		les	bx, [bp+var_4]
+-		push	word ptr es:[bx+2]
+-		push	word ptr es:[bx+4]
+-		mov	al, es:[bx+9]
+-		mov	ah, 0
+-		push	ax
+-		call	grcg_circlefill
+-		call	grcg_off
+-		les	bx, [bp+var_4]
+-		mov	al, es:[bx+9]
+-		mov	ah, 0
+-		cmp	ax, es:[bx+6]
+-		jge	short loc_1577A
+-		mov	al, es:[bx+9]
+-		add	al, 10h
+-		mov	es:[bx+9], al
+-
+-loc_1577A:
+-		les	bx, [bp+var_4]
+-		cmp	byte ptr es:[bx+1], 20h	; ' '
+-		jbe	short loc_1579B
+-		inc	byte ptr es:[bx]
+-		mov	byte ptr es:[bx+1], 0
+-		mov	al, es:[bx+9]
+-		mov	ah, 0
+-		mov	es:[bx+6], ax
+-		mov	byte ptr es:[bx+9], 8
+-
+-loc_1579B:
+-		les	bx, [bp+var_4]
+-		mov	ax, es:[bx+2]
+-		mov	dl, es:[bx+9]
+-		mov	dh, 0
+-		sub	ax, dx
+-		push	ax
+-		mov	al, byte_2558D
+-		cbw
+-		pop	dx
+-		add	dx, ax
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		cmp	dx, _player_left_on_page[bx]
+-		jge	loc_158CD
+-		mov	bx, word ptr [bp+var_4]
+-		mov	ax, es:[bx+2]
+-		mov	dl, es:[bx+9]
+-		mov	dh, 0
+-		add	ax, dx
+-		push	ax
+-		mov	al, byte_2558D
+-		cbw
+-		pop	dx
+-		sub	dx, ax
+-		add	dx, 0FFE0h
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		cmp	dx, _player_left_on_page[bx]
+-		jle	loc_158CD
+-		mov	bx, word ptr [bp+var_4]
+-		mov	ax, es:[bx+4]
+-		mov	dl, es:[bx+9]
+-		mov	dh, 0
+-		sub	ax, dx
+-		push	ax
+-		mov	al, byte_2558D
+-		cbw
+-		pop	dx
+-		add	dx, ax
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		cmp	dx, _player_top_on_page[bx]
+-		jge	loc_158CD
+-		mov	bx, word ptr [bp+var_4]
+-		mov	ax, es:[bx+4]
+-		mov	dl, es:[bx+9]
+-		mov	dh, 0
+-		add	ax, dx
+-		push	ax
+-		mov	al, byte_2558D
+-		cbw
+-		pop	dx
+-		sub	dx, ax
+-		add	dx, 0FFE0h
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		cmp	dx, _player_top_on_page[bx]
+-		jle	loc_158CD
+-		mov	_player_is_hit, 1
+-		jmp	loc_158CD
+-; ---------------------------------------------------------------------------
+-
+-loc_15849:
+-		les	bx, [bp+var_4]
+-		cmp	byte ptr es:[bx], 4
+-		jnz	short loc_158CD
+-		mov	al, _page_back
+-		mov	ah, 0
+-		mov	dx, si
+-		and	dx, 1
+-		cmp	ax, dx
+-		jnz	short loc_158CD
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + V_WHITE
+-		les	bx, [bp+var_4]
+-		call	grcg_circlefill pascal, word ptr es:[bx+2], word ptr es:[bx+4], word ptr es:[bx+6]
+-		call	grcg_off
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + 0
+-		les	bx, [bp+var_4]
+-		push	word ptr es:[bx+2]
+-		push	word ptr es:[bx+4]
+-		mov	al, es:[bx+9]
+-		mov	ah, 0
+-		push	ax
+-		call	grcg_circlefill
+-		call	grcg_off
+-		les	bx, [bp+var_4]
+-		mov	al, es:[bx+9]
+-		mov	ah, 0
+-		cmp	ax, es:[bx+6]
+-		jl	short loc_158C0
+-		mov	byte ptr es:[bx], 0
+-		jmp	short loc_158CD
+-; ---------------------------------------------------------------------------
+-
+-loc_158C0:
+-		les	bx, [bp+var_4]
+-		mov	al, es:[bx+9]
+-		add	al, 10h
+-		mov	es:[bx+9], al
+-
+-loc_158CD:
+-		inc	si
+-		add	word ptr [bp+var_4], 0Ah
+-
+-loc_158D2:
+-		cmp	si, 10h
+-		jl	loc_15683
+-		pop	si
+-		leave
+-		retn
+-sigma_1566F	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_158DC	proc near
+-		push	bp
+-		mov	bp, sp
+-		call	super_put_rect pascal, point_254E6.x, point_254E6.y, _patnum_2064E
+-		mov	ax, point_254E6.x
+-		add	ax, 64
+-		push	ax
+-		push	point_254E6.y
+-		mov	ax, _patnum_2064E
+-		inc	ax
+-		push	ax
+-		call	super_put_rect
+-		pop	bp
+-		retn
+-sigma_158DC	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_15907	proc near
+-
+-@@patnum		= word ptr -4
+-@@damage		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		mov	ax, _patnum_2064E
+-		mov	[bp+@@patnum], ax
+-		cmp	_byte_2066A, 0
+-		jnz	loc_159A4
+-		mov	bx, _boss_left_on_back_page
+-		mov	ax, [bx]
+-		add	ax, 36
+-		push	ax
+-		mov	bx, _boss_top_on_back_page
+-		mov	ax, [bx]
+-		add	ax, 32
+-		push	ax
+-		push	380020h
+-		call	@SHOTS_HITTEST$QIIII
+-		mov	[bp+@@damage], ax
+-		or	ax, ax
+-		jz	short loc_1594A
+-		mov	_patnum_2064E, 130
+-		add	_boss_damage, ax
+-
+-loc_1594A:
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	dx, point_254E6.x
+-		add	dx, 8
+-		mov	bx, ax
+-		cmp	_player_left_on_page[bx], dx
+-		jle	short loc_159A4
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	dx, point_254E6.x
+-		add	dx, 88
+-		mov	bx, ax
+-		cmp	_player_left_on_page[bx], dx
+-		jge	short loc_159A4
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _player_top_on_page[bx]
+-		cmp	ax, point_254E6.y
+-		jle	short loc_159A4
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	dx, point_254E6.y
+-		add	dx, 64
+-		mov	bx, ax
+-		cmp	_player_top_on_page[bx], dx
+-		jge	short loc_159A4
+-		mov	_player_is_hit, 1
+-
+-loc_159A4:
+-		call	sigma_158DC
+-		mov	ax, [bp+@@patnum]
+-		mov	_patnum_2064E, ax
+-		leave
+-		retn
+-sigma_15907	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @sigma_bg_render$qv
+-@sigma_bg_render$qv	proc far
+-
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 2
+-		mov	[bp+var_2], 8
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		add	ax, offset _boss_left_on_page
+-		mov	_boss_left_on_back_page, ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		add	ax, offset _boss_top_on_page
+-		mov	_boss_top_on_back_page, ax
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _boss_left_on_page[bx]
+-		mov	bx, _boss_left_on_back_page
+-		mov	[bx], ax
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _boss_top_on_page[bx]
+-		mov	bx, _boss_top_on_back_page
+-		mov	[bx], ax
+-		call	egc_off
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + 0
+-		call	grcg_byteboxfill_x pascal, (PLAYFIELD_VRAM_LEFT shl 16) or PLAYFIELD_TOP, ((PLAYFIELD_VRAM_RIGHT - 1) shl 16) or PLAYFIELD_BOTTOM - 1
+-		call	grcg_off
+-		call	sigma_15645
+-		leave
+-		retf
+-@sigma_bg_render$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_15A25	proc near
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		cmp	_boss_phase_frame, 10
+-		jge	short loc_15A38
+-		call	sigma_158DC
+-		xor	ax, ax
+-		jmp	loc_15D53
+-; ---------------------------------------------------------------------------
+-
+-loc_15A38:
+-		cmp	_boss_phase_frame, 10
+-		jnz	short loc_15A54
+-		mov	byte_2558E, 8
+-		call	sigma_158DC
+-		call	_snd_se_play c, 9
+-		jmp	loc_15D51
+-; ---------------------------------------------------------------------------
+-
+-loc_15A54:
+-		cmp	_boss_phase_frame, 90
+-		jge	short loc_15AD0
+-		call	sigma_158DC
+-		cmp	_page_back, 0
+-		jnz	short loc_15A8A
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + V_WHITE
+-		mov	ax, point_254E6.x
+-		add	ax, 64
+-		push	ax
+-		mov	ax, point_254E6.y
+-		add	ax, 64
+-		push	ax
+-		push	24
+-		call	grcg_circlefill
+-		call	grcg_off
+-
+-loc_15A8A:
+-		cmp	_boss_phase_frame, 50
+-		jl	short loc_15ABA
+-		cmp	_page_back, 0
+-		jz	short loc_15ABA
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + V_WHITE
+-		mov	ax, point_254E6.x
+-		add	ax, 64
+-		call	grcg_vline pascal, ax, (PLAYFIELD_TOP shl 16) or PLAYFIELD_BOTTOM - 1
+-		call	grcg_off
+-
+-loc_15ABA:
+-		cmp	_boss_phase_frame, 89
+-		jnz	loc_15D51
+-		call	_snd_se_play c, 3
+-		jmp	loc_15D51
+-; ---------------------------------------------------------------------------
+-
+-loc_15AD0:
+-		cmp	_boss_phase_frame, 100
+-		jge	loc_15B65
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + V_WHITE
+-		mov	al, byte_2558E
+-		mov	ah, 0
+-		push	ax
+-		mov	ax, point_254E6.x
+-		add	ax, 64
+-		pop	dx
+-		sub	ax, dx
+-		mov	bx, 8
+-		cwd
+-		idiv	bx
+-		push	ax
+-		push	10h
+-		mov	al, byte_2558E
+-		mov	ah, 0
+-		add	ax, point_254E6.x
+-		add	ax, 64
+-		cwd
+-		idiv	bx
+-		push	ax
+-		push	PLAYFIELD_BOTTOM - 1
+-		call	grcg_byteboxfill_x
+-		call	grcg_off
+-		mov	al, byte_2558E
+-		mov	ah, 0
+-		mov	dx, point_254E6.x
+-		add	dx, 56
+-		sub	dx, ax
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		cmp	dx, _player_left_on_page[bx]
+-		jge	short loc_15B57
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	dl, byte_2558E
+-		mov	dh, 0
+-		add	dx, point_254E6.x
+-		add	dx, 40
+-		mov	bx, ax
+-		cmp	_player_left_on_page[bx], dx
+-		jge	short loc_15B57
+-		mov	_player_is_hit, 1
+-
+-loc_15B57:
+-		mov	al, byte_2558E
+-		add	al, 8
+-		mov	byte_2558E, al
+-		call	sigma_158DC
+-		jmp	loc_15D51
+-; ---------------------------------------------------------------------------
+-
+-loc_15B65:
+-		cmp	_boss_phase_frame, 100
+-		jnz	short loc_15BC2
+-		mov	al, byte_2558E
+-		mov	ah, 0
+-		mov	dx, point_254E6.x
+-		add	dx, 56
+-		sub	dx, ax
+-		mov	word_25592, dx
+-		mov	al, byte_2558E
+-		mov	ah, 0
+-		add	ax, point_254E6.x
+-		add	ax, 40
+-		mov	word_25594, ax
+-		mov	al, byte_2558E
+-		mov	ah, 0
+-		push	ax
+-		mov	ax, point_254E6.x
+-		add	ax, 64
+-		pop	dx
+-		sub	ax, dx
+-		mov	bx, 8
+-		cwd
+-		idiv	bx
+-		mov	byte_2558F, al
+-		mov	al, byte_2558E
+-		mov	ah, 0
+-		add	ax, point_254E6.x
+-		add	ax, 64
+-		cwd
+-		idiv	bx
+-		add	al, -1
+-		mov	byte_25590, al
+-		mov	_patnum_2064E, 134
+-		jmp	loc_15D51
+-; ---------------------------------------------------------------------------
+-
+-loc_15BC2:
+-		cmp	_boss_phase_frame, 140
+-		jg	short loc_15C25
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + V_WHITE
+-		mov	al, byte_2558F
+-		mov	ah, 0
+-		push	ax
+-		push	10h
+-		mov	al, byte_25590
+-		mov	ah, 0
+-		push	ax
+-		push	PLAYFIELD_BOTTOM - 1
+-		call	grcg_byteboxfill_x
+-		call	grcg_off
+-		call	sigma_158DC
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _player_left_on_page[bx]
+-		cmp	ax, word_25592
+-		jle	loc_15D51
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _player_left_on_page[bx]
+-		cmp	ax, word_25594
+-		jge	loc_15D51
+-		mov	_player_is_hit, 1
+-		jmp	loc_15D51
+-; ---------------------------------------------------------------------------
+-
+-loc_15C25:
+-		cmp	_boss_phase_frame, 180
+-		jge	loc_15CBC
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + V_WHITE
+-		mov	al, byte_2558F
+-		mov	ah, 0
+-		push	ax
+-		push	10h
+-		mov	al, byte_25590
+-		mov	ah, 0
+-		push	ax
+-		push	PLAYFIELD_BOTTOM - 1
+-		call	grcg_byteboxfill_x
+-		call	grcg_off
+-		mov	ax, _boss_phase_frame
+-		mov	bx, 10
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jnz	short loc_15C67
+-		add	_patnum_2064E, 2
+-
+-loc_15C67:
+-		call	sigma_158DC
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _player_left_on_page[bx]
+-		cmp	ax, word_25592
+-		jle	short loc_15C95
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _player_left_on_page[bx]
+-		cmp	ax, word_25594
+-		jge	short loc_15C95
+-		mov	_player_is_hit, 1
+-
+-loc_15C95:
+-		mov	ax, _boss_phase_frame
+-		and	ax, 1
+-		mov	si, ax
+-		mov	ax, RES_Y
+-		sub	ax, _scroll_line
+-		push	ax
+-		mov	ax, _scroll_line
+-		imul	ax, 40
+-		add	ax, si
+-		push	ax
+-		push	si
+-		call	graph_scroll
+-		mov	_slowdown_factor, 2
+-		jmp	loc_15D51
+-; ---------------------------------------------------------------------------
+-
+-loc_15CBC:
+-		cmp	_boss_phase_frame, 220
+-		jg	short loc_15D1C
+-		mov	_slowdown_factor, 1
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + V_WHITE
+-		mov	al, byte_2558F
+-		mov	ah, 0
+-		push	ax
+-		push	10h
+-		mov	al, byte_25590
+-		mov	ah, 0
+-		push	ax
+-		push	PLAYFIELD_BOTTOM - 1
+-		call	grcg_byteboxfill_x
+-		call	grcg_off
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _player_left_on_page[bx]
+-		cmp	ax, word_25592
+-		jle	short loc_15D51
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _player_left_on_page[bx]
+-		cmp	ax, word_25594
+-		jge	short loc_15D51
+-		mov	_player_is_hit, 1
+-		jmp	short loc_15D51
+-; ---------------------------------------------------------------------------
+-
+-loc_15D1C:
+-		cmp	_boss_phase_frame, 224
+-		jge	short loc_15D4C
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + 0
+-		mov	al, byte_2558F
+-		mov	ah, 0
+-		push	ax
+-		push	10h
+-		mov	al, byte_25590
+-		mov	ah, 0
+-		push	ax
+-		push	PLAYFIELD_BOTTOM - 1
+-		call	grcg_byteboxfill_x
+-		call	grcg_off
+-		jmp	short loc_15D51
+-; ---------------------------------------------------------------------------
+-
+-loc_15D4C:
+-		mov	ax, 1
+-		jmp	short loc_15D53
+-; ---------------------------------------------------------------------------
+-
+-loc_15D51:
+-		xor	ax, ax
+-
+-loc_15D53:
+-		pop	si
+-		pop	bp
+-		retn
+-sigma_15A25	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_15D56	proc near
+-
+-@@angle		= byte ptr -1
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 2
+-		push	si
+-		cmp	_boss_phase_frame, 20
+-		jl	loc_15E81
+-		cmp	_boss_phase_frame, 20
+-		jnz	short loc_15D83
+-		mov	byte_25596, 0
+-		cmp	_player_topleft.x, (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - (PLAYER_W / 2))
+-		jge	short loc_15D7E
+-		mov	al, 1
+-		jmp	short loc_15D80
+-; ---------------------------------------------------------------------------
+-
+-loc_15D7E:
+-		mov	al, -1
+-
+-loc_15D80:
+-		mov	byte_25597, al
+-
+-loc_15D83:
+-		mov	ax, _boss_phase_frame
+-		mov	bx, 4
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jnz	short loc_15D9A
+-		call	_snd_se_play c, 3
+-
+-loc_15D9A:
+-		cmp	_boss_phase_frame, 148
+-		jge	short loc_15DB7
+-		mov	al, byte_25597
+-		cbw
+-		mov	bx, _boss_left_on_back_page
+-		add	[bx], ax
+-		test	byte ptr _boss_phase_frame, 1
+-		jz	loc_15E81
+-		jmp	short loc_15DF2
+-; ---------------------------------------------------------------------------
+-
+-loc_15DB7:
+-		cmp	_boss_phase_frame, 212
+-		jge	short loc_15DD7
+-		mov	al, byte_25597
+-		cbw
+-		shl	ax, 2
+-		mov	bx, _boss_left_on_back_page
+-		sub	[bx], ax
+-		test	byte ptr _boss_phase_frame, 1
+-		jz	loc_15E81
+-		jmp	short loc_15DF2
+-; ---------------------------------------------------------------------------
+-
+-loc_15DD7:
+-		cmp	_boss_phase_frame, 340
+-		jge	short loc_15E19
+-		mov	al, byte_25597
+-		cbw
+-		mov	bx, _boss_left_on_back_page
+-		add	[bx], ax
+-		test	byte ptr _boss_phase_frame, 1
+-		jz	loc_15E81
+-
+-loc_15DF2:
+-		call	@randring2_next8_and$quc pascal, 7Fh
+-		mov	ah, 0
+-		add	ax, point_254E6.x
+-		push	ax	; left
+-		mov	ax, point_254E6.y
+-		add	ax, 64
+-		push	ax	; top
+-		push	40h	; angle
+-		push	BG_1	; group
+-		call	@randring2_next8_and$quc pascal, 1Fh
+-		mov	ah, 0
+-		add	ax, ((1 shl 4) + 14)
+-		push	ax	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-		jmp	short loc_15E81
+-; ---------------------------------------------------------------------------
+-
+-loc_15E19:
+-		cmp	_boss_phase_frame, 440
+-		jge	short loc_15E7B
+-		inc	byte_25596
+-		call	@randring2_next8$qv
+-		mov	ah, 0
+-		mov	dl, byte_25596
+-		mov	dh, 0
+-		add	dx, dx
+-		push	dx
+-		cwd
+-		pop	bx
+-		idiv	bx
+-		mov	al, 40h
+-		sub	al, byte_25596
+-		add	dl, al
+-		mov	[bp+@@angle], dl
+-		test	byte ptr _boss_phase_frame, 3
+-		jnz	short loc_15E81
+-		xor	si, si
+-		jmp	short loc_15E74
+-; ---------------------------------------------------------------------------
+-
+-loc_15E4D:
+-		call	@randring2_next8_and$quc pascal, 7Fh
+-		mov	ah, 0
+-		add	ax, point_254E6.x
+-		push	ax	; left
+-		mov	ax, point_254E6.y
+-		add	ax, 64
+-		push	ax	; top
+-		push	word ptr [bp+@@angle]	; angle
+-		push	BG_1	; group
+-		call	@randring2_next8_and$quc pascal, 1Fh
+-		mov	ah, 0
+-		add	ax, ((1 shl 4) + 14)
+-		push	ax	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-		inc	si
+-
+-loc_15E74:
+-		cmp	si, 3
+-		jl	short loc_15E4D
+-		jmp	short loc_15E81
+-; ---------------------------------------------------------------------------
+-
+-loc_15E7B:
+-		mov	_boss_phase_frame, 0
+-
+-loc_15E81:
+-		pop	si
+-		leave
+-		retn
+-sigma_15D56	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_15E84	proc near
+-		push	bp
+-		mov	bp, sp
+-		cmp	_boss_phase_frame, 100
+-		jl	short loc_15EF5
+-		cmp	_boss_phase_frame, 100
+-		jnz	short loc_15EAD
+-		mov	byte_2558C, 7
+-		mov	byte_2558D, 4
+-		push	80h
+-
+-loc_15EA2:
+-		push	1400040h
+-		call	sigma_155C5
+-		jmp	short loc_15EE7
+-; ---------------------------------------------------------------------------
+-
+-loc_15EAD:
+-		cmp	_boss_phase_frame, 120
+-		jnz	short loc_15EB9
+-		push	140h
+-		jmp	short loc_15EA2
+-; ---------------------------------------------------------------------------
+-
+-loc_15EB9:
+-		cmp	_boss_phase_frame, 130
+-		jle	short loc_15EE7
+-		cmp	_boss_phase_frame, 150
+-		jge	short loc_15EE7
+-		mov	ax, _boss_phase_frame
+-		mov	bx, 4
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jnz	short loc_15EE7
+-		call	@bullets_add_pellet$qiiucuci pascal, left_253B6, top_253B8, 00h, BG_5_SPREAD_MEDIUM_AIMED, ((7 shl 4) + 8)
+-
+-loc_15EE7:
+-		cmp	_boss_phase_frame, 200
+-		jle	short loc_15EF5
+-		mov	_boss_phase_frame, 0
+-
+-loc_15EF5:
+-		pop	bp
+-		retn
+-sigma_15E84	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_15EF7	proc near
+-		push	bp
+-		mov	bp, sp
+-		cmp	_boss_phase_frame, 50
+-		jge	short loc_15F06
+-		mov	ax, 1
+-		pop	bp
+-		retn
+-; ---------------------------------------------------------------------------
+-
+-loc_15F06:
+-		cmp	_boss_phase_frame, 50
+-		jnz	short loc_15F1E
+-		cmp	_player_topleft.x, (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - (PLAYER_W / 2))
+-		jge	short loc_15F19
+-		mov	al, 1
+-		jmp	short loc_15F1B
+-; ---------------------------------------------------------------------------
+-
+-loc_15F19:
+-		mov	al, -1
+-
+-loc_15F1B:
+-		mov	byte_25598, al
+-
+-loc_15F1E:
+-		cmp	_boss_phase_frame, 114
+-		jge	short loc_15F37
+-		mov	al, byte_25598
+-		cbw
+-		mov	bx, _boss_left_on_back_page
+-		add	[bx], ax
+-		mov	bx, _boss_top_on_back_page
+-		inc	word ptr [bx]
+-		jmp	short loc_15F6B
+-; ---------------------------------------------------------------------------
+-
+-loc_15F37:
+-		cmp	_boss_phase_frame, 242
+-		jge	short loc_15F4B
+-		mov	al, byte_25598
+-		cbw
+-		mov	bx, _boss_left_on_back_page
+-		sub	[bx], ax
+-		jmp	short loc_15F6B
+-; ---------------------------------------------------------------------------
+-
+-loc_15F4B:
+-		cmp	_boss_phase_frame, 306
+-		jge	short loc_15F65
+-		mov	al, byte_25598
+-		cbw
+-		mov	bx, _boss_left_on_back_page
+-		add	[bx], ax
+-		mov	bx, _boss_top_on_back_page
+-		dec	word ptr [bx]
+-		jmp	short loc_15F6B
+-; ---------------------------------------------------------------------------
+-
+-loc_15F65:
+-		mov	_boss_phase_frame, 0
+-
+-loc_15F6B:
+-		xor	ax, ax
+-		pop	bp
+-		retn
+-sigma_15EF7	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_15F6F	proc near
+-		push	bp
+-		mov	bp, sp
+-		call	sigma_15EF7
+-		or	ax, ax
+-		jnz	short loc_15F93
+-		test	byte ptr _boss_phase_frame, 1Fh
+-		jnz	short loc_15F93
+-		push	left_253B6	; left
+-		push	top_253B8	; top
+-		call	@randring2_next8$qv
+-		push	ax	; angle
+-		push	BG_32_RING	; group
+-		push	((5 shl 4) + 5)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-
+-loc_15F93:
+-		pop	bp
+-		retn
+-sigma_15F6F	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_15F95	proc near
+-
+-@@angle		= byte ptr -1
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 2
+-		push	si
+-		push	di
+-		cmp	_boss_phase_frame, 50
+-		jl	loc_16172
+-		cmp	_boss_phase_frame, 50
+-		jnz	short loc_15FB7
+-		call	_snd_se_play c, 9
+-
+-loc_15FB7:
+-		cmp	_boss_phase_frame, 100
+-		jge	short loc_15FCF
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		add	ax, 128
+-		mov	_patnum_2064E, ax
+-		jmp	loc_16172
+-; ---------------------------------------------------------------------------
+-
+-loc_15FCF:
+-		cmp	_boss_phase_frame, 100
+-		jnz	short loc_15FFD
+-		mov	ax, _player_topleft.x
+-		add	ax, 16
+-		mov	word_2559A, ax
+-		mov	ax, _player_topleft.y
+-		add	ax, 16
+-		mov	word_2559C, ax
+-		mov	byte_2558C, 3
+-		mov	byte_2558D, 0FCh
+-		mov	angle_2559E, 0
+-		mov	_patnum_2064E, 128
+-
+-loc_15FFD:
+-		cmp	_boss_phase_frame, 130
+-		jge	short loc_1604A
+-		mov	ax, _boss_phase_frame
+-		mov	bx, 8
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jnz	short loc_1601A
+-		push	(GC_RMW shl 16) + V_WHITE
+-		jmp	short loc_1602E
+-; ---------------------------------------------------------------------------
+-
+-loc_1601A:
+-		mov	ax, _boss_phase_frame
+-		mov	bx, 8
+-		cwd
+-		idiv	bx
+-		cmp	dx, 2
+-		jnz	short loc_16042
+-		push	(GC_RMW shl 16) + 0
+-
+-loc_1602E:
+-		call	grcg_setcolor
+-		call	grcg_circle pascal, word_2559A, word_2559C, 112
+-
+-loc_16042:
+-		call	grcg_off
+-		jmp	loc_16172
+-; ---------------------------------------------------------------------------
+-
+-loc_1604A:
+-		cmp	_boss_phase_frame, 450
+-		jge	loc_16146
+-		cmp	_page_back, 0
+-		jnz	short loc_1607A
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + V_WHITE
+-		call	grcg_circle pascal, word_2559A, word_2559C, 112
+-		call	grcg_off
+-
+-loc_1607A:
+-		cmp	_boss_phase_frame, 150
+-		jl	loc_16172
+-		mov	ax, _boss_phase_frame
+-		mov	bx, 12
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jnz	loc_16122
+-		mov	al, angle_2559E
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		movsx	eax, _CosTable8[bx]
+-		imul	eax, 70h
+-		sar	eax, 8
+-		add	ax, word_2559A
+-		mov	si, ax
+-		mov	al, angle_2559E
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		movsx	eax, _SinTable8[bx]
+-		imul	eax, 70h
+-		sar	eax, 8
+-		add	ax, word_2559C
+-		mov	di, ax
+-		push	si
+-		push	ax
+-		push	18h
+-		call	sigma_155C5
+-		mov	al, angle_2559E
+-		add	al, 80h
+-		mov	[bp+@@angle], al
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		movsx	eax, _CosTable8[bx]
+-		imul	eax, 70h
+-		sar	eax, 8
+-		add	ax, word_2559A
+-		mov	si, ax
+-		mov	al, [bp+@@angle]
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		movsx	eax, _SinTable8[bx]
+-		imul	eax, 70h
+-		sar	eax, 8
+-		add	ax, word_2559C
+-		mov	di, ax
+-		push	si
+-		push	ax
+-		push	18h
+-		call	sigma_155C5
+-		mov	al, angle_2559E
+-		add	al, -10h
+-		mov	angle_2559E, al
+-
+-loc_16122:
+-		cmp	_boss_phase_frame, 200
+-		jl	short loc_16172
+-		test	byte ptr _boss_phase_frame, 0Fh
+-		jnz	short loc_16172
+-		push	left_253B6	; left
+-		push	top_253B8	; top
+-		call	@randring2_next8$qv
+-		push	ax	; angle
+-		push	BG_32_RING	; group
+-		push	(5 shl 4)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-		jmp	short loc_16172
+-; ---------------------------------------------------------------------------
+-
+-loc_16146:
+-		cmp	_page_back, 0
+-		jnz	short loc_16172
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + 0
+-		call	grcg_circle pascal, word_2559A, word_2559C, 112
+-		call	grcg_off
+-		mov	_boss_phase_frame, 0
+-
+-loc_16172:
+-		pop	di
+-		pop	si
+-		leave
+-		retn
+-sigma_15F95	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_16176	proc near
+-		push	bp
+-		mov	bp, sp
+-		call	sigma_15EF7
+-		or	ax, ax
+-		jnz	short loc_1619A
+-		test	byte ptr _boss_phase_frame, 7
+-		jnz	short loc_1619A
+-		push	left_253B6	; left
+-		push	top_253B8	; top
+-		call	@randring2_next8$qv
+-		push	ax	; angle
+-		push	BG_16_RING	; group
+-		push	((3 shl 4) + 2)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-
+-loc_1619A:
+-		pop	bp
+-		retn
+-sigma_16176	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_1619C	proc near
+-		push	bp
+-		mov	bp, sp
+-		cmp	_boss_phase_frame, 50
+-		jl	loc_162D1
+-		cmp	_boss_phase_frame, 50
+-		jnz	short loc_161B9
+-		call	_snd_se_play c, 9
+-
+-loc_161B9:
+-		cmp	_boss_phase_frame, 100
+-		jge	short loc_161D0
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		add	ax, 128
+-		mov	_patnum_2064E, ax
+-		pop	bp
+-		retn
+-; ---------------------------------------------------------------------------
+-
+-loc_161D0:
+-		cmp	_boss_phase_frame, 100
+-		jnz	short loc_161EE
+-		mov	_patnum_2064E, 128
+-		mov	left_255A0, PLAYFIELD_LEFT
+-		mov	byte_255A2, 0
+-		mov	bullet_special_turns_max, 1
+-
+-loc_161EE:
+-		test	byte ptr _boss_phase_frame, 0Fh
+-		jnz	loc_162D1
+-		push	left_255A0	; left
+-		push	(PLAYFIELD_TOP + 8)	; top
+-		push	40h	; angle
+-		push	BSM_BOUNCE_LEFT_RIGHT_TOP_BOTTOM	; group
+-		mov	al, byte_255A2
+-		mov	ah, 0
+-		add	ax, PAT_BULLET16_BILLIARD_BALL_RED
+-		push	ax	; patnum
+-		push	(4 shl 4)	; speed
+-		call	@bullets_add_16x16$qiiuc32bullet_group_or_special_motion_tii
+-		mov	ax, (PLAYFIELD_RIGHT + BULLET16_W)
+-		sub	ax, left_255A0
+-		push	ax	; left
+-		push	(PLAYFIELD_TOP + 8)	; top
+-		push	40h	; angle
+-		push	BSM_BOUNCE_LEFT_RIGHT_TOP_BOTTOM	; group
+-		mov	al, byte_255A2
+-		mov	ah, 0
+-		add	ax, PAT_BULLET16_BILLIARD_BALL_RED
+-		push	ax	; patnum
+-		push	(4 shl 4)	; speed
+-		call	@bullets_add_16x16$qiiuc32bullet_group_or_special_motion_tii
+-		add	left_255A0, BULLET16_W
+-		cmp	left_255A0, (PLAYFIELD_LEFT + (PLAYFIELD_W / 2))
+-		jnz	short loc_162B2
+-		mov	_pillar_frames_new, 20h	; ' '
+-		mov	ax, point_254E6.x
+-		add	ax, 60
+-		push	ax
+-		push	top_253B8
+-		push	1006Fh
+-		call	@PILLAR_ADD$QIIII
+-		mov	_pillar_frames_new, 30h	; '0'
+-		mov	ax, point_254E6.x
+-		add	ax, 44
+-		push	ax
+-		push	top_253B8
+-		push	1006Fh
+-		call	@PILLAR_ADD$QIIII
+-		mov	ax, point_254E6.x
+-		add	ax, 76
+-		push	ax
+-		push	top_253B8
+-		push	1006Fh
+-		call	@PILLAR_ADD$QIIII
+-		mov	_pillar_frames_new, 64h	; 'd'
+-		mov	ax, point_254E6.x
+-		add	ax, 28
+-		push	ax
+-		push	top_253B8
+-		push	1006Fh
+-		call	@PILLAR_ADD$QIIII
+-		mov	ax, point_254E6.x
+-		add	ax, 92
+-		push	ax
+-		push	top_253B8
+-		push	1006Fh
+-		call	@PILLAR_ADD$QIIII
+-		mov	_pillar_frames_new, 10h
+-
+-loc_162B2:
+-		cmp	left_255A0, (PLAYFIELD_RIGHT + BULLET16_W)
+-		jl	short loc_162D1
+-		mov	left_255A0, PLAYFIELD_LEFT
+-		inc	byte_255A2
+-		cmp	byte_255A2, 2
+-		jb	short loc_162D1
+-		mov	_boss_phase_frame, 0
+-
+-loc_162D1:
+-		pop	bp
+-		retn
+-sigma_1619C	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_162D3	proc near
+-
+-var_E		= word ptr -0Eh
+-@@angle	= byte ptr -0Bh
+-var_A	= word ptr -0Ah
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 0Eh
+-		push	si
+-		push	di
+-		mov	si, 13AEh
+-		lea	di, [bp+var_A]
+-		push	ss
+-		pop	es
+-		mov	cx, 5
+-		rep movsw
+-		call	sigma_15EF7
+-		or	ax, ax
+-		jnz	loc_1641D
+-		cmp	_boss_phase_frame, 100
+-		jnz	short loc_16300
+-		mov	byte_255A3, 0
+-		jmp	loc_1641D
+-; ---------------------------------------------------------------------------
+-
+-loc_16300:
+-		cmp	_boss_phase_frame, 114
+-		jz	short loc_1634B
+-		cmp	_boss_phase_frame, 118
+-		jz	short loc_16325
+-		cmp	_boss_phase_frame, 122
+-		jz	short loc_1637C
+-		cmp	_boss_phase_frame, 242
+-		jz	short loc_1634B
+-		cmp	_boss_phase_frame, 246
+-		jnz	short loc_16374
+-
+-loc_16325:
+-		mov	al, byte_255A3
+-		inc	byte_255A3
+-		cbw
+-		add	ax, ax
+-		lea	dx, [bp+var_A]
+-		add	ax, dx
+-		mov	bx, ax
+-		mov	ax, ss:[bx]
+-		add	ax, point_254E6.x
+-		push	ax
+-		push	top_253B8
+-		push	1006Fh
+-		call	@PILLAR_ADD$QIIII
+-
+-loc_1634B:
+-		mov	al, byte_255A3
+-		inc	byte_255A3
+-		cbw
+-		add	ax, ax
+-		lea	dx, [bp+var_A]
+-		add	ax, dx
+-		mov	bx, ax
+-		mov	ax, ss:[bx]
+-		add	ax, point_254E6.x
+-		push	ax
+-		push	top_253B8
+-		push	1006Fh
+-		call	@PILLAR_ADD$QIIII
+-		jmp	loc_1641D
+-; ---------------------------------------------------------------------------
+-
+-loc_16374:
+-		cmp	_boss_phase_frame, 250
+-		jnz	short loc_163CB
+-
+-loc_1637C:
+-		mov	al, byte_255A3
+-		inc	byte_255A3
+-		cbw
+-		add	ax, ax
+-		lea	dx, [bp+var_A]
+-		add	ax, dx
+-		mov	bx, ax
+-		mov	ax, ss:[bx]
+-		add	ax, point_254E6.x
+-		push	ax
+-		push	top_253B8
+-		push	1006Fh
+-		call	@PILLAR_ADD$QIIII
+-		mov	al, byte_255A3
+-		cbw
+-		add	ax, ax
+-		lea	dx, [bp+var_A]
+-		add	ax, dx
+-		mov	bx, ax
+-		mov	ax, ss:[bx]
+-		add	ax, point_254E6.x
+-		push	ax
+-		push	top_253B8
+-		push	1006Fh
+-		call	@PILLAR_ADD$QIIII
+-		mov	byte_255A3, 0
+-		jmp	short loc_1641D
+-; ---------------------------------------------------------------------------
+-
+-loc_163CB:
+-		cmp	_boss_phase_frame, 120
+-		jle	short loc_1641D
+-		cmp	_boss_phase_frame, 240
+-		jge	short loc_1641D
+-		test	byte ptr _boss_phase_frame, 0Fh
+-		jnz	short loc_1641D
+-		mov	[bp+@@angle], -70h
+-		mov	[bp+var_E], 0
+-		jmp	short loc_16417
+-; ---------------------------------------------------------------------------
+-
+-loc_163EC:
+-		push	left_253B6	; left
+-		push	top_253B8	; top
+-		push	word ptr [bp+@@angle]	; angle
+-		push	BSM_BOUNCE_LEFT_RIGHT_TOP_BOTTOM	; group
+-		mov	ax, [bp+var_E]
+-		mov	bx, 2
+-		cwd
+-		idiv	bx
+-		add	dx, PAT_BULLET16_BILLIARD_BALL_RED
+-		push	dx	; patnum
+-		push	(3 shl 4) + 12	; speed
+-		call	@bullets_add_16x16$qiiuc32bullet_group_or_special_motion_tii
+-		mov	al, [bp+@@angle]
+-		add	al, 10h
+-		mov	[bp+@@angle], al
+-		inc	[bp+var_E]
+-
+-loc_16417:
+-		cmp	[bp+@@angle], -10h
+-		jb	short loc_163EC
+-
+-loc_1641D:
+-		pop	di
+-		pop	si
+-		leave
+-		retn
+-sigma_162D3	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_16421	proc near
+-
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 2
+-		cmp	_boss_phase_frame, 50
+-		jl	locret_16553
+-		cmp	_boss_phase_frame, 50
+-		jnz	short loc_16441
+-		call	_snd_se_play c, 9
+-
+-loc_16441:
+-		cmp	_boss_phase_frame, 100
+-		jge	short loc_16458
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		add	ax, 128
+-		mov	_patnum_2064E, ax
+-		leave
+-		retn
+-; ---------------------------------------------------------------------------
+-
+-loc_16458:
+-		cmp	_boss_phase_frame, 100
+-		jnz	short loc_164AD
+-		push	left_253B6
+-		push	top_253B8
+-		mov	ax, _player_topleft.x
+-		add	ax, 16
+-		push	ax
+-		mov	ax, _player_topleft.y
+-		add	ax, 16
+-		push	ax
+-		push	0
+-		push	ds
+-		push	offset point_255A4.x
+-		push	ds
+-		push	offset point_255A4.y
+-		push	48
+-		call	@vector2_between_plus$qiiiiucmit6i
+-		mov	ax, point_255A4.x
+-		neg	ax
+-		mov	word_255AC, ax
+-		mov	_patnum_2064E, 128
+-		mov	ax, left_253B6
+-		mov	word_255A8, ax
+-		mov	word_255AE, ax
+-		mov	byte_2558D, 0FCh
+-		mov	byte_2558C, 3
+-		mov	ax, top_253B8
+-		mov	word_255AA, ax
+-
+-loc_164AD:
+-		test	byte ptr _boss_phase_frame, 7
+-		jnz	locret_16553
+-		push	word_255A8
+-		push	word_255AA
+-		push	30h ; '0'
+-		call	sigma_155C5
+-		mov	[bp+var_2], ax
+-		push	word_255AE
+-		push	word_255AA
+-		push	30h ; '0'
+-		call	sigma_155C5
+-		or	ax, ax
+-		jz	short loc_164E3
+-		cmp	[bp+var_2], 0
+-		jz	short loc_164E3
+-		mov	_boss_phase_frame, 0
+-
+-loc_164E3:
+-		mov	ax, point_255A4.x
+-		add	word_255A8, ax
+-		mov	ax, word_255AC
+-		add	word_255AE, ax
+-		mov	ax, point_255A4.y
+-		add	word_255AA, ax
+-		mov	ax, _player_topleft.x
+-		add	ax, 16
+-		cmp	ax, word_255A8
+-		jle	short loc_1650B
+-		add	word_255A8, 10h
+-		jmp	short loc_1651C
+-; ---------------------------------------------------------------------------
+-
+-loc_1650B:
+-		mov	ax, _player_topleft.x
+-		add	ax, 16
+-		cmp	ax, word_255A8
+-		jge	short loc_1651C
+-		sub	word_255A8, 10h
+-
+-loc_1651C:
+-		mov	ax, _player_topleft.x
+-		add	ax, 16
+-		cmp	ax, word_255AE
+-		jle	short loc_1652F
+-		sub	word_255AE, 10h
+-		jmp	short loc_16540
+-; ---------------------------------------------------------------------------
+-
+-loc_1652F:
+-		mov	ax, _player_topleft.x
+-		add	ax, 16
+-		cmp	ax, word_255AE
+-		jge	short loc_16540
+-		add	word_255AE, 10h
+-
+-loc_16540:
+-		push	left_253B6	; left
+-		push	top_253B8	; top
+-		call	@randring2_next8$qv
+-		push	ax	; angle
+-		push	BG_16_RING	; group
+-		push	((3 shl 4) + 12)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-
+-locret_16553:
+-		leave
+-		retn
+-sigma_16421	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_16555	proc near
+-		push	bp
+-		mov	bp, sp
+-		call	sigma_15EF7
+-		or	ax, ax
+-		jnz	short loc_165A3
+-		cmp	_boss_phase_frame, 50
+-		jnz	short loc_1656B
+-		mov	byte_2558C, 7
+-
+-loc_1656B:
+-		mov	ax, _boss_phase_frame
+-		and	ax, 3Fh
+-		cmp	ax, 32
+-		jnz	short loc_16589
+-		mov	ax, _player_topleft.x
+-		add	ax, 16
+-		push	ax
+-		mov	ax, _player_topleft.y
+-		add	ax, 16
+-		push	ax
+-		push	30h ; '0'
+-		call	sigma_155C5
+-
+-loc_16589:
+-		test	byte ptr _boss_phase_frame, 3Fh
+-		jnz	short loc_165A3
+-		push	left_253B6	; left
+-		push	top_253B8	; top
+-		call	@randring2_next8$qv
+-		push	ax	; angle
+-		push	BG_32_RING	; group
+-		push	((3 shl 4) + 12)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-
+-loc_165A3:
+-		pop	bp
+-		retn
+-sigma_16555	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_165A5	proc near
+-		push	bp
+-		mov	bp, sp
+-		cmp	_boss_phase_frame, 50
+-		jge	short loc_165B4
+-		mov	ax, 1
+-		pop	bp
+-		retn
+-; ---------------------------------------------------------------------------
+-
+-loc_165B4:
+-		cmp	_boss_phase_frame, 50
+-		jnz	short loc_165CC
+-		cmp	_player_topleft.x, (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - (PLAYER_W / 2))
+-		jge	short loc_165C7
+-		mov	al, 2
+-		jmp	short loc_165C9
+-; ---------------------------------------------------------------------------
+-
+-loc_165C7:
+-		mov	al, 0FEh
+-
+-loc_165C9:
+-		mov	byte_255B0, al
+-
+-loc_165CC:
+-		cmp	_boss_phase_frame, 130
+-		jl	short loc_165F0
+-		cmp	_boss_phase_frame, 290
+-		jge	short loc_165E8
+-		mov	al, byte_255B0
+-		cbw
+-		mov	bx, _boss_left_on_back_page
+-		sub	[bx], ax
+-		jmp	short loc_16602
+-; ---------------------------------------------------------------------------
+-
+-loc_165E8:
+-		cmp	_boss_phase_frame, 370
+-		jge	short loc_165FC
+-
+-loc_165F0:
+-		mov	al, byte_255B0
+-		cbw
+-		mov	bx, _boss_left_on_back_page
+-		add	[bx], ax
+-		jmp	short loc_16602
+-; ---------------------------------------------------------------------------
+-
+-loc_165FC:
+-		mov	_boss_phase_frame, 0
+-
+-loc_16602:
+-		xor	ax, ax
+-		pop	bp
+-		retn
+-sigma_165A5	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_16606	proc near
+-		push	bp
+-		mov	bp, sp
+-		call	sigma_165A5
+-		or	ax, ax
+-		jnz	short loc_1664E
+-		cmp	_boss_phase_frame, 50
+-		jnz	short loc_1661C
+-		mov	byte_2558C, 7
+-
+-loc_1661C:
+-		test	byte ptr _boss_phase_frame, 3Fh
+-		jnz	short loc_16636
+-		mov	ax, _player_topleft.x
+-		add	ax, 16
+-		push	ax
+-		mov	ax, _player_topleft.y
+-		add	ax, 16
+-		push	ax
+-		push	30h ; '0'
+-		call	sigma_155C5
+-
+-loc_16636:
+-		test	byte ptr _boss_phase_frame, 7
+-		jnz	short loc_1664E
+-		call	@bullets_add_pellet$qiiucuci pascal, left_253B6, top_253B8, 00h, BG_2_SPREAD_ULTRAWIDE_AIMED, ((4 shl 4) + 6)
+-
+-loc_1664E:
+-		pop	bp
+-		retn
+-sigma_16606	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_16650	proc near
+-		push	bp
+-		mov	bp, sp
+-		call	sigma_165A5
+-		or	ax, ax
+-		jnz	short loc_1668C
+-		cmp	_boss_phase_frame, 50
+-		jnz	short loc_16666
+-		mov	angle_255B1, 0
+-
+-loc_16666:
+-		test	byte ptr _boss_phase_frame, 7
+-		jnz	short loc_1668C
+-		push	left_253B6	; left
+-		push	top_253B8	; top
+-		push	word ptr angle_255B1	; angle
+-		push	BG_8_RING	; group
+-		push	(PAT_BULLET16_BALL shl 16) or (5 shl 4)	; (patnum shl 16) or speed
+-		call	@bullets_add_16x16$qiiuc32bullet_group_or_special_motion_tii
+-		mov	al, angle_255B1
+-		add	al, 08h
+-		mov	angle_255B1, al
+-
+-loc_1668C:
+-		pop	bp
+-		retn
+-sigma_16650	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_1668E	proc near
+-		push	bp
+-		mov	bp, sp
+-		call	sigma_165A5
+-		or	ax, ax
+-		jnz	short loc_166DC
+-		cmp	_boss_phase_frame, 50
+-		jnz	short loc_166A4
+-		mov	byte_2558C, 7
+-
+-loc_166A4:
+-		test	byte ptr _boss_phase_frame, 1Fh
+-		jnz	short loc_166BE
+-		mov	ax, _player_topleft.x
+-		add	ax, 16
+-		push	ax
+-		mov	ax, _player_topleft.y
+-		add	ax, 16
+-		push	ax
+-		push	30h ; '0'
+-		call	sigma_155C5
+-
+-loc_166BE:
+-		mov	ax, _boss_phase_frame
+-		and	ax, 1Fh
+-		cmp	ax, 16
+-		jnz	short loc_166DC
+-		push	left_253B6	; left
+-		push	top_253B8	; top
+-		call	@randring2_next8$qv
+-		push	ax	; angle
+-		push	BG_16_RING	; group
+-		push	((3 shl 4) + 12)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-
+-loc_166DC:
+-		pop	bp
+-		retn
+-sigma_1668E	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sigma_166DE	proc far
+-
+-arg_0		= word ptr  6
+-
+-		push	bp
+-		mov	bp, sp
+-		mov	al, byte_255B4
+-		mov	ah, 0
+-		or	ax, ax
+-		jz	short loc_166F6
+-		cmp	ax, 1
+-		jz	short loc_166FC
+-		cmp	ax, 2
+-		jz	short loc_16702
+-		jmp	short loc_16706
+-; ---------------------------------------------------------------------------
+-
+-loc_166F6:
+-		call	fp_255B6
+-		jmp	short loc_16706
+-; ---------------------------------------------------------------------------
+-
+-loc_166FC:
+-		call	fp_255B8
+-		jmp	short loc_16706
+-; ---------------------------------------------------------------------------
+-
+-loc_16702:
+-		call	fp_255BA
+-
+-loc_16706:
+-		cmp	_boss_phase_frame, 0
+-		jnz	short loc_16742
+-		inc	byte_255B4
+-		mov	al, byte_255B4
+-		mov	ah, 0
+-		cmp	ax, [bp+arg_0]
+-		jl	short loc_16725
+-		mov	byte_255B4, 0
+-		mov	byte_255B3, 1
+-
+-loc_16725:
+-		mov	ax, _boss_damage
+-		cmp	ax, word_255BC
+-		jl	short loc_16742
+-		mov	_boss_damage, 0
+-		inc	byte_255B2
+-		mov	byte_255B4, 0
+-		mov	byte_255B3, 0
+-
+-loc_16742:
+-		pop	bp
+-		retf
+-sigma_166DE	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @sigma_update$qv
+-@sigma_update$qv	proc far
+-
+-var_1		= byte ptr -1
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 2
+-		push	si
+-		mov	bx, _boss_left_on_back_page
+-		mov	ax, [bx]
+-		mov	point_254E6.x, ax
+-		mov	bx, _boss_top_on_back_page
+-		mov	ax, [bx]
+-		mov	point_254E6.y, ax
+-		mov	ax, point_254E6.x
+-		add	ax, 60
+-		mov	left_253B6, ax
+-		mov	ax, point_254E6.y
+-		add	ax, 60
+-		mov	top_253B8, ax
+-		inc	_boss_phase_frame
+-		mov	ax, left_253B6
+-		mov	_shot_target_left, ax
+-		mov	ax, top_253B8
+-		mov	_shot_target_top, ax
+-		test	byte ptr _stage_frame, 1
+-		jnz	short loc_167D0
+-		mov	al, byte_255BE
+-		add	al, 8
+-		mov	byte_255BE, al
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + 4
+-		xor	si, si
+-		mov	al, byte_255BE
+-		jmp	short loc_167C3
+-; ---------------------------------------------------------------------------
+-
+-loc_167A0:
+-		push	0E000C8h
+-		mov	al, [bp+var_1]
+-		mov	ah, 0
+-		push	ax
+-		mov	al, _reduce_effects
+-		mov	ah, 0
+-		imul	ax, 0Eh
+-		add	ax, 2
+-		push	ax
+-		call	@CIRCLE_DOTS_PUT$QIIII
+-		inc	si
+-		mov	al, [bp+var_1]
+-		add	al, 80h
+-
+-loc_167C3:
+-		mov	[bp+var_1], al
+-		cmp	si, 2
+-		jl	short loc_167A0
+-		call	grcg_off
+-
+-loc_167D0:
+-		cmp	_byte_2066A, 0
+-		jz	short loc_167E6
+-		call	sigma_15A25
+-		or	ax, ax
+-		jz	loc_16962
+-		mov	ax, 2
+-		jmp	loc_16968
+-; ---------------------------------------------------------------------------
+-
+-loc_167E6:
+-		cmp	byte_255B2, 0
+-		jnz	short loc_16825
+-		cmp	_boss_phase_frame, 50
+-		jle	loc_16948
+-		mov	byte_255B4, 0
+-		mov	_boss_phase_frame, 0
+-		inc	byte_255B2
+-		mov	byte_255B3, 0
+-		mov	fp_255B6, offset sigma_15D56
+-		mov	fp_255B8, offset sigma_15E84
+-		mov	fp_255BA, offset sigma_15F6F
+-		mov	word_255BC, 708h
+-		jmp	loc_16948
+-; ---------------------------------------------------------------------------
+-
+-loc_16825:
+-		cmp	byte_255B2, 1
+-		jnz	short loc_16838
+-		push	3
+-		call	sigma_166DE
+-		add	sp, 2
+-		jmp	loc_16948
+-; ---------------------------------------------------------------------------
+-
+-loc_16838:
+-		cmp	byte_255B2, 2
+-		jnz	short loc_16868
+-		mov	byte_255B4, 0
+-		mov	_boss_phase_frame, 0
+-		inc	byte_255B2
+-		mov	byte_255B3, 0
+-		mov	fp_255B6, offset sigma_15F95
+-		mov	fp_255B8, offset sigma_16176
+-		mov	word_255BC, 708h
+-		jmp	loc_16948
+-; ---------------------------------------------------------------------------
+-
+-loc_16868:
+-		cmp	byte_255B2, 3
+-		jz	short loc_168DC
+-		cmp	byte_255B2, 4
+-		jnz	short loc_1689F
+-		mov	byte_255B4, 0
+-		mov	_boss_phase_frame, 0
+-		inc	byte_255B2
+-		mov	byte_255B3, 0
+-		mov	fp_255B6, offset sigma_1619C
+-		mov	fp_255B8, offset sigma_162D3
+-		mov	word_255BC, 708h
+-		jmp	loc_16948
+-; ---------------------------------------------------------------------------
+-
+-loc_1689F:
+-		cmp	byte_255B2, 5
+-		jz	short loc_168DC
+-		cmp	byte_255B2, 6
+-		jnz	short loc_168D5
+-		mov	byte_255B4, 0
+-		mov	_boss_phase_frame, 0
+-		inc	byte_255B2
+-		mov	byte_255B3, 0
+-		mov	fp_255B6, offset sigma_16421
+-		mov	fp_255B8, offset sigma_16555
+-		mov	word_255BC, 708h
+-		jmp	short loc_16948
+-; ---------------------------------------------------------------------------
+-
+-loc_168D5:
+-		cmp	byte_255B2, 7
+-		jnz	short loc_168E7
+-
+-loc_168DC:
+-		push	2
+-		call	sigma_166DE
+-		add	sp, 2
+-		jmp	short loc_16948
+-; ---------------------------------------------------------------------------
+-
+-loc_168E7:
+-		cmp	byte_255B2, 8
+-		jnz	short loc_1691C
+-		mov	byte_255B4, 0
+-		mov	_boss_phase_frame, 0
+-		inc	byte_255B2
+-		mov	byte_255B3, 0
+-		mov	fp_255B6, offset sigma_16606
+-		mov	fp_255B8, offset sigma_16650
+-		mov	fp_255BA, offset sigma_1668E
+-		mov	word_255BC, 1388h
+-		jmp	short loc_16948
+-; ---------------------------------------------------------------------------
+-
+-loc_1691C:
+-		cmp	byte_255B2, 9
+-		jnz	short loc_16948
+-		push	3
+-		call	sigma_166DE
+-		add	sp, 2
+-		cmp	_boss_damage, 1300
+-		jl	short loc_16948
+-		mov	_byte_2066A, 1
+-		add	_score, 300000
+-		mov	_boss_phase_frame, 0
+-
+-loc_16948:
+-		mov	bx, _boss_left_on_back_page
+-		mov	ax, [bx]
+-		mov	point_254E6.x, ax
+-		mov	bx, _boss_top_on_back_page
+-		mov	ax, [bx]
+-		mov	point_254E6.y, ax
+-		call	sigma_15907
+-		inc	_sigma_frame
+-
+-loc_16962:
+-		call	sigma_1566F
+-		mov	ax, 1
+-
+-loc_16968:
+-		pop	si
+-		leave
+-		retf
+-@sigma_update$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @sigma_init$qv
+-@sigma_init$qv	proc far
+-		push	bp
+-		mov	bp, sp
+-		call	sub_1A6C5
+-		mov	_tile_mode, TM_NONE
+-		call	@dialog_pre$qv
+-		call	super_clean pascal, (128 shl 16) or 192
+-		mov	super_patnum, 80h
+-		call	super_entry_bfnt pascal, ds, offset aStage5b1_bft ; "stage5b1.bft"
+-		call	super_entry_bfnt pascal, ds, offset aStage5b2_bft ; "stage5b2.bft"
+-		call	grc_setclip pascal, (PLAYFIELD_LEFT shl 16) or 0, (PLAYFIELD_RIGHT shl 16) or (RES_Y - 1)
+-		call	@dialog_script_extra_pre_intro_an$qv
+-		mov	_boss_left_on_page[0 * word], (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - 64)
+-		mov	_boss_left_on_page[1 * word], (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - 64)
+-		mov	point_254E6.x, (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - 64)
+-		mov	_boss_top_on_page[0 * word], (PLAYFIELD_TOP + 32)
+-		mov	_boss_top_on_page[1 * word], (PLAYFIELD_TOP + 32)
+-		mov	point_254E6.y, (PLAYFIELD_TOP + 32)
+-		mov	_boss_damage, 0
+-		mov	_boss_phase_frame, 0
+-		mov	_patnum_2064E, 128
+-		mov	byte_255B2, 0
+-		mov	byte_2558C, 7
+-		nopcall	@bullets_clear$qv
+-		call	@shots_clear$qv
+-		push	1
+-		call	palette_white_out
+-		call	sigma_158DC
+-		push	ds
+-		push	offset aBoss5_m	; "boss5.m"
+-		nopcall	@sub_13ABB$qnc
+-		add	sp, 4
+-		push	1
+-		call	palette_white_in
+-		call	@dialog_script_generic_part_anima$q17dialog_sequence_t pascal, DS_PREBOSS
+-		call	@dialog_post$qv
+-		pop	bp
+-		retf
+-@sigma_init$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @sigma_end$qv
+-@sigma_end$qv	proc far
+-		push	bp
+-		mov	bp, sp
+-		call	@dialog_pre$qv
+-		call	@dialog_script_generic_part_anima$q17dialog_sequence_t pascal, DS_POSTBOSS
+-		call	@stage_extra_clear_bonus_animate$qv
+-		call	@key_delay$qv
+-		les	bx, _resident
+-		mov	es:[bx+mikoconfig_t.stage], 7Fh
+-		mov	eax, _score
+-		imul	eax, 10
+-		movzx	edx, es:[bx+mikoconfig_t.continues_used]
+-		add	eax, edx
+-		mov	es:[bx+mikoconfig_t.score], eax
+-		call	@scoredat_extra_clear_save$qv
+-		call	@GameExecl$qnc c, offset aMaine, ds	; "maine"
+-		pop	bp
+-		retf
+-@sigma_end$qv	endp
++	extern @sigma_bg_render$qv:proc
++	extern @sigma_update$qv:proc
++	extern @sigma_init$qv:proc
++	extern @sigma_end$qv:proc
+ 	extern @sub_16A6B$qv:proc
+ 	extern @sub_16A8A$qv:proc
+ 	extern @sub_16D9B$qv:proc
+@@ -7019,7 +4797,7 @@ public @mima_init$qv
+ 		push	bp
+ 		mov	bp, sp
+ 		push	si
+-		call	sub_1A6C5
++		call	@sub_1A6C5$qv
+ 		call	@dialog_pre$qv
+ 		call	super_clean pascal, (128 shl 16) or 192
+ 		call	super_entry_bfnt pascal, ds, offset aMima_bft ; "mima.bft"
+@@ -8298,7 +6076,8 @@ sub_1A529	endp
+ 
+ ; Attributes: bp-based frame
+ 
+-sub_1A6C5	proc near
++public @sub_1A6C5$qv
++@sub_1A6C5$qv	proc near
+ 		push	bp
+ 		mov	bp, sp
+ 		mov	al, _page_front
+@@ -8380,7 +6159,7 @@ sub_1A6C5	proc near
+ 		call	super_roll_put_tiny
+ 		pop	bp
+ 		retn
+-sub_1A6C5	endp
++@sub_1A6C5$qv	endp
+ 
+ 
+ ; =============== S U B	R O U T	I N E =======================================
+@@ -8392,7 +6171,7 @@ public @marisa_init$qv
+ 		push	bp
+ 		mov	bp, sp
+ 		push	si
+-		call	sub_1A6C5
++		call	@sub_1A6C5$qv
+ 		call	@dialog_pre$qv
+ 		call	super_clean pascal, (128 shl 16) or 192
+ 		mov	super_patnum, 80h
+@@ -9409,21 +7188,17 @@ word_1EE18	dw 1002h
+ word_1EE1A	dw 1211h
+ byte_1EE1C	db 9
+ 		db 0
+-		db  3Ch	; <
+-		db    0
+-		db  2Ch	; ,
+-		db    0
+-		db  4Ch	; L
+-		db    0
+-		db  1Ch
+-		db    0
+-		db  5Ch
+-		db    0
+-aStage5b1_bft	db 'stage5b1.bft',0
+-aStage5b2_bft	db 'stage5b2.bft',0
+-aBoss5_m	db 'boss5.m',0
+-; char aMaine[]
+-aMaine		db 'maine',0
++public _SIGMA_PILLAR_OFFSETS
++_SIGMA_PILLAR_OFFSETS	dw 60, 44, 76, 28, 92
++public _aStage5b1_bft
++_aStage5b1_bft	db 'stage5b1.bft',0
++public _aStage5b2_bft
++_aStage5b2_bft	db 'stage5b2.bft',0
++public _aBoss5_m
++_aBoss5_m	db 'boss5.m',0
++; char _aMaine[]
++public _aMaine
++_aMaine		db 'maine',0
+ public _stage_line_cur
+ _stage_line_cur	dw 0
+ public _enemy_count
+@@ -10045,47 +7820,79 @@ public _hi
+ _hi	scoredat_section_t <?>
+ byte_253B4	db ?
+ 		db ?
+-left_253B6	dw ?
+-top_253B8	dw ?
++public _sigma_bullet_left
++_sigma_bullet_left	dw ?
++public _sigma_bullet_top
++_sigma_bullet_top	dw ?
+ 		db 300 dup(?)
+-point_254E6	Point <?>
++public _sigma_topleft
++_sigma_topleft	Point <?>
+ byte_254EA	db ?
+-		db 161 dup(?)
+-byte_2558C	db ?
+-byte_2558D	db ?
+-byte_2558E	db ?
+-byte_2558F	db ?
+-byte_25590	db ?
+ 		db ?
+-word_25592	dw ?
+-word_25594	dw ?
+-byte_25596	db ?
+-byte_25597	db ?
+-byte_25598	db ?
++public _sigma_circles
++_sigma_circles	db (16 * 10) dup(?)
++public _sigma_circle_frame_mask
++_sigma_circle_frame_mask	db ?
++public _sigma_circle_hitbox_shrink
++_sigma_circle_hitbox_shrink	db ?
++public _sigma_beam_w
++_sigma_beam_w	db ?
++public _sigma_beam_vram_left
++_sigma_beam_vram_left	db ?
++public _sigma_beam_vram_right
++_sigma_beam_vram_right	db ?
++		db ?
++public _sigma_beam_left
++_sigma_beam_left	dw ?
++public _sigma_beam_right
++_sigma_beam_right	dw ?
++public _sigma_15D56_frames
++_sigma_15D56_frames	db ?
++public _sigma_15D56_velocity
++_sigma_15D56_velocity	db ?
++public _sigma_15EF7_velocity
++_sigma_15EF7_velocity	db ?
+ 		db ?
+-word_2559A	dw ?
+-word_2559C	dw ?
+-angle_2559E	db ?
++public _sigma_15F95_center_x
++_sigma_15F95_center_x	dw ?
++public _sigma_15F95_center_y
++_sigma_15F95_center_y	dw ?
++public _sigma_15F95_angle
++_sigma_15F95_angle	db ?
+ 		db ?
+-left_255A0	dw ?
+-byte_255A2	db ?
+-byte_255A3	db ?
+-point_255A4	Point <?>
+-word_255A8	dw ?
+-word_255AA	dw ?
+-word_255AC	dw ?
+-word_255AE	dw ?
+-byte_255B0	db ?
+-angle_255B1	db ?
+-byte_255B2	db ?
+-byte_255B3	db ?
+-byte_255B4	db ?
++public _sigma_1619C_left
++_sigma_1619C_left	dw ?
++public _sigma_1619C_round
++_sigma_1619C_round	db ?
++public _sigma_pillar_i
++_sigma_pillar_i	db ?
++public _sigma_16421_velocity
++_sigma_16421_velocity	Point <?>
++public _sigma_16421_left_1
++_sigma_16421_left_1	dw ?
++public _sigma_16421_top
++_sigma_16421_top	dw ?
++public _sigma_16421_velocity_x_2
++_sigma_16421_velocity_x_2	dw ?
++public _sigma_16421_left_2
++_sigma_16421_left_2	dw ?
++public _sigma_165A5_velocity
++_sigma_165A5_velocity	db ?
++public _sigma_16650_angle
++_sigma_16650_angle	db ?
++public _sigma_phase
++_sigma_phase	db ?
++public _sigma_patterns_done
++_sigma_patterns_done	db ?
++public _sigma_pattern
++_sigma_pattern	db ?
+ 		db ?
+-fp_255B6	dw ?
+-fp_255B8	dw ?
+-fp_255BA	dw ?
+-word_255BC	dw ?
+-byte_255BE	db ?
++public _sigma_pattern_funcs
++_sigma_pattern_funcs	dw 3 dup(?)
++public _sigma_phase_damage
++_sigma_phase_damage	dw ?
++public _sigma_ring_angle
++_sigma_ring_angle	db ?
+ 		db ?
+ public _enemies
+ _enemies	db (25 * 26h) dup(?)
