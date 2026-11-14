@@ -1,0 +1,382 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 23:43:17 +0100
+Subject: [PATCH] Define the string literals of main()'s TU in C++
+
+The literal pool follows source order. ZUN's "m" extension was "m\0\0",
+since stage_fn_set_ext() copies three bytes. MAIN's BGM titles are spaced
+differently from the Music Room's, so they get their own Shift-JIS header.
+---
+ th02/main_01a.cpp      | 100 ++++++++++++++---------------------------
+ th02/shiftjis/main.hpp |  27 +++++++++++
+ th02_main.asm          |  81 ---------------------------------
+ 3 files changed, 60 insertions(+), 148 deletions(-)
+ create mode 100644 th02/shiftjis/main.hpp
+
+diff --git a/th02/main_01a.cpp b/th02/main_01a.cpp
+index 8a3b6b7d..7adcd9db 100644
+--- a/th02/main_01a.cpp
++++ b/th02/main_01a.cpp
+@@ -34,6 +34,8 @@
+ #include "th02/main/player/player.hpp"
+ #include "th02/main/stage/stage.hpp"
+ #include "th02/main/tile/tile.hpp"
++#include "th02/shiftjis/fns.hpp"
++#include "th02/shiftjis/main.hpp"
+ #include "th02/main/midboss/midboss.hpp"
+ #include "th01/rank.h"
+ #include "th02/core/globals.hpp"
+@@ -58,41 +60,19 @@ extern input_t *DemoBuf; /* ZUN symbol [MAGNet2010] */
+ 
+ #pragma option -a2
+ 
+-extern const char near aTH02_02[];
+-extern const char near aTH02_03[];
+-extern const char near aTH02_04[];
+-extern const char near aTH02_05[];
+-extern const char near aTH02_06[];
+-extern const char near aTH02_07[];
+-extern const char near aTH02_08[];
+-extern const char near aTH02_09[];
+-extern const char near aTH02_10[];
+-extern const char near aTH02_11[];
+-extern const char near aTH02_12[];
+-extern const char near aTH02_13[];
+-extern const char near aSTAGE1_TITLE[];
+-extern const char near aSTAGE2_TITLE[];
+-extern const char near aSTAGE3_TITLE[];
+-extern const char near aSTAGE4_TITLE[];
+-extern const char near aSTAGE5_TITLE[];
+-extern const char near aEXTRA_TITLE[];
+-extern const char aGAME_QUIT[];
+-extern const char aGAME_RESUME[];
+-extern const char aQUIT_PROMPT[];
+-extern const char aQUIT_NO[];
+-extern const char aQUIT_YES[];
+ 
+ unsigned char gStage1[16] = { gb_S, gb_T, gb_A, gb_G, gb_E, gb_1 };
+ unsigned char gEXTRA_STAGE[16] = {
+ 	gb_E, gb_X, gb_T, gb_R, gb_A, gb__, gb__, gb_S, gb_T, gb_A, gb_G, gb_E
+ };
+ const char near *BGM_TITLES[] = {
+-	aTH02_02, aTH02_03, aTH02_04, aTH02_05, aTH02_06, aTH02_07,
+-	aTH02_08, aTH02_09, aTH02_10, aTH02_11, aTH02_12, aTH02_13,
++	BGM_TITLE_02, BGM_TITLE_03, BGM_TITLE_04, BGM_TITLE_05,
++	BGM_TITLE_06, BGM_TITLE_07, BGM_TITLE_08, BGM_TITLE_09,
++	BGM_TITLE_10, BGM_TITLE_11, BGM_TITLE_12, BGM_TITLE_13,
+ };
+ const char near *STAGE_TITLES[] = {
+-	aSTAGE1_TITLE, aSTAGE2_TITLE, aSTAGE3_TITLE,
+-	aSTAGE4_TITLE, aSTAGE5_TITLE, aEXTRA_TITLE,
++	STAGE1_TITLE, STAGE2_TITLE, STAGE3_TITLE,
++	STAGE4_TITLE, STAGE5_TITLE, EXTRA_TITLE,
+ };
+ uint8_t STAGE_TITLE_HALFLENGTHS[] = { 10, 13, 11, 12, 13, 13 };
+ unsigned char gDEMO_PLAY[] = {
+@@ -104,12 +84,6 @@ unsigned char gPAUSE_MENU[] = {
+ unsigned char g11SPACES[] = {
+ 	gb__, gb__, gb__, gb__, gb__, gb__, gb__, gb__, gb__, gb__, gb__, 0
+ };
+-const char far *PAUSE_CHOICE_QUIT = aGAME_QUIT;
+-const char far *PAUSE_CHOICE_RESUME = aGAME_RESUME;
+-unsigned char pause_sel = 0;
+-const char far *QUIT_PROMPT = aQUIT_PROMPT;
+-const char far *QUIT_CHOICE_NO = aQUIT_NO;
+-const char far *QUIT_CHOICE_YES = aQUIT_YES;
+ 
+ typedef void (far *voidfunc_t)(void);
+ typedef int (far *intfunc_t)(void);
+@@ -137,12 +111,6 @@ extern uint8_t byte_1F46E;
+ extern uint8_t stage1_gaiji_halflen;
+ extern const char near *stage_title;
+ extern uint8_t stage_title_halflen;
+-extern const char aBmt[];
+-extern const char aBbt[];
+-extern const char aMap[];
+-extern const char aMpn[];
+-extern const char aM[];
+-extern const char aMiko_k_mpn[];
+ extern Palette8 stage_palette;
+ 
+ #define BOSS_DEC(name) \
+@@ -161,6 +129,8 @@ BOSS_DEC(sigma);
+ void sub_17979(void);
+ void sub_1766E(void);
+ void sub_BFD0(void);
++#define EMPTY_LINE "                                                "
++
+ void sub_C05D(void);
+ void sub_13671(void);
+ void sub_140AE(void);
+@@ -182,12 +152,6 @@ void near sub_C5B0(void);
+ extern "C" void pascal near text_wipe(void);
+ 
+ extern intfunc_t farfp_1F4A4;
+-extern char aOp[];
+-extern const char aHuuma_efc[];
+-extern const char aEye_pi[];
+-extern const char aMiko_bft[];
+-extern const char aMiko32_bft[];
+-extern const char aMiko16_bft[];
+ 
+ int near cfg_load(void);
+ void hiscore_init(void);
+@@ -259,7 +223,7 @@ next_stage:
+ 	}
+ 	PaletteTone = 0;
+ 	palette_show();
+-	GameExecl(aOp);
++	GameExecl(BINARY_OP);
+ 	return 0;
+ }
+ 
+@@ -267,12 +231,12 @@ void near main_init(void)
+ {
+ 	int i;
+ 
+-	snd_load(aHuuma_efc, SND_LOAD_SE);
++	snd_load("huuma.efc", SND_LOAD_SE);
+ 	hiscore_init();
+-	pi_load(0, aEye_pi);
+-	super_entry_bfnt(aMiko_bft);
+-	super_entry_bfnt(aMiko32_bft);
+-	super_entry_bfnt(aMiko16_bft);
++	pi_load(0, "EYE.PI");
++	super_entry_bfnt("miko.bft");
++	super_entry_bfnt("miko32.bft");
++	super_entry_bfnt("miko16.bft");
+ 	for(i = 48; i < 128; i++) {
+ 		super_convert_tiny(i);
+ 	}
+@@ -373,14 +337,14 @@ void near stage_init(void)
+ 	stage_title = STAGE_TITLES[stage_id];
+ 	stage_title_halflen = STAGE_TITLE_HALFLENGTHS[stage_id];
+ 	super_entry_bfnt(fn);
+-	stage_fn_set_ext(fn, aBmt);
++	stage_fn_set_ext(fn, "bmt");
+ 	super_entry_bfnt(fn);
+-	stage_fn_set_ext(fn, aBbt);
++	stage_fn_set_ext(fn, "bbt");
+ 	super_entry_bfnt(fn);
+-	stage_fn_set_ext(fn, aMap);
++	stage_fn_set_ext(fn, "map");
+ 	map_load(fn);
+ 	tiles_stuff_reset();
+-	stage_fn_set_ext(fn, aMpn);
++	stage_fn_set_ext(fn, "mpn");
+ 	mpn_load(fn);
+ 	memcpy(&stage_palette, &mpn_palette, sizeof(Palette8));
+ 	stage_data_free();
+@@ -456,7 +420,7 @@ void near stage_init(void)
+ 	tile_area_init_and_put_both();
+ 	if(resident->demo_num == 0) {
+ 		snd_delay_until_volume(255);
+-		stage_fn_set_ext(fn, aM);
++		stage_fn_set_ext(fn, "m\0\0"); // all three bytes are copied
+ 	}
+ 	items_init_and_reset();
+ 	score_extend_init();
+@@ -470,7 +434,7 @@ void near stage_init(void)
+ 	graph_accesspage(0);
+ 	tiles_render_all();
+ 	mpn_free();
+-	mpn_load(aMiko_k_mpn);
++	mpn_load("miko_k.mpn");
+ 	if(resident->demo_num == 0) {
+ 		sub_13ABB(fn);
+ 	}
+@@ -509,6 +473,12 @@ void near stage_continue_reset(void)
+ 	overlay_stage_enter_animate();
+ }
+ 
++const char far *PAUSE_CHOICE_QUIT = PAUSE_CHOICE_QUIT_STR;
++const char far *PAUSE_CHOICE_RESUME = PAUSE_CHOICE_RESUME_STR;
++unsigned char pause_sel = 0;
++const char far *QUIT_PROMPT = QUIT_PROMPT_STR;
++const char far *QUIT_CHOICE_NO = QUIT_CHOICE_NO_STR;
++const char far *QUIT_CHOICE_YES = QUIT_CHOICE_YES_STR;
+ extern unsigned char pause_col_first;
+ extern unsigned char pause_col_second;
+ 
+@@ -822,7 +792,6 @@ int nullfunc_false(void)
+ extern uint8_t bgm_show_timer;
+ extern uint8_t bgm_title_id;
+ extern uint8_t byte_1F46E;
+-extern const char aEMPTY[];
+ void sub_17A55(void);
+ void sub_16A8A(void);
+ 
+@@ -870,8 +839,8 @@ void sub_C05D(void)
+ {
+ 	if(stage_frame == 160) {
+ 		if(resident->demo_num == 0) {
+-			text_putsa(4, 12, aEMPTY, TX_WHITE);
+-			text_putsa(4, 13, aEMPTY, TX_WHITE);
++			text_putsa(4, 12, EMPTY_LINE, TX_WHITE);
++			text_putsa(4, 13, EMPTY_LINE, TX_WHITE);
+ 		}
+ 		farfp_1F498 = nullfunc_void;
+ 	}
+@@ -886,7 +855,7 @@ void near bgm_show(void)
+ 		}
+ 		bgm_show_timer++;
+ 		if(bgm_show_timer >= 160) {
+-			text_putsa(24, 23, &aEMPTY[22], TX_WHITE);
++			text_putsa(24, 23, (EMPTY_LINE + 22), TX_WHITE);
+ 			bgm_show_timer = 0;
+ 		}
+ 	}
+@@ -898,9 +867,6 @@ void near egc_start_copy_1(void)
+ 	egc_setup_copy();
+ }
+ 
+-extern const char aDemo1_rec[];
+-extern const char aDemo2_rec[];
+-extern const char aDemo3_rec[];
+ 
+ int demo_frame = 0;
+ 
+@@ -912,15 +878,15 @@ void demo_load(void)
+ 	resident->frame = 18;
+ 	if(resident->demo_num == 1) {
+ 		stage_id = 3;
+-		file_ropen(aDemo1_rec);
++		file_ropen("DEMO1.REC");
+ 		resident->shottype = 0;
+ 	} else if(resident->demo_num == 2) {
+ 		stage_id = 2;
+-		file_ropen(aDemo2_rec);
++		file_ropen("DEMO2.REC");
+ 		resident->shottype = 2;
+ 	} else if(resident->demo_num == 3) {
+ 		stage_id = 1;
+-		file_ropen(aDemo3_rec);
++		file_ropen("DEMO3.REC");
+ 		resident->shottype = 1;
+ 	}
+ 	file_read(DemoBuf, (DEMO_N * 2));
+diff --git a/th02/shiftjis/main.hpp b/th02/shiftjis/main.hpp
+new file mode 100644
+index 00000000..97dc0938
+--- /dev/null
++++ b/th02/shiftjis/main.hpp
+@@ -0,0 +1,27 @@
++// Stage titles and pause menu strings of TH02's MAIN.EXE
++
++#define STAGE1_TITLE            "紫野　～ Purple Dawn"
++#define STAGE2_TITLE            "雷獣　～Midnight Rainstorm"
++#define STAGE3_TITLE            "紅夢　～ Scarlet Dream"
++#define STAGE4_TITLE            "霊魔　～Revengeful Ghost"
++#define STAGE5_TITLE            "封魔　～東方封魔録 and ..."
++#define EXTRA_TITLE             "異空　～for Lunatic Gamers"
++#define PAUSE_CHOICE_QUIT_STR   "ゲーム終了"
++#define PAUSE_CHOICE_RESUME_STR "ゲーム再開"
++#define QUIT_PROMPT_STR         "ほんとに終了しちゃうの"
++#define QUIT_CHOICE_NO_STR      "うそです。すみません。"
++#define QUIT_CHOICE_YES_STR     "　　はい、やめます。　"
++
++// In-game BGM titles. Not the same spacing as the Music Room's in bgm.hpp.
++#define BGM_TITLE_02 "　 博麗　～Eastern Wind "
++#define BGM_TITLE_03 "　  She's in a temper!! "
++#define BGM_TITLE_04 "　   End of Daylight　  "
++#define BGM_TITLE_05 "   　 やみのちから　　  "
++#define BGM_TITLE_06 "　　　　　幻夢界　　　　"
++#define BGM_TITLE_07 " 　　　死を賭して　　　 "
++#define BGM_TITLE_08 "ひもろぎ、むらさきにもえ"
++#define BGM_TITLE_09 "   　 恋色マジック 　   "
++#define BGM_TITLE_10 "　東方封魔録　～幽幻乱舞"
++#define BGM_TITLE_11 "   Complete Darkness    "
++#define BGM_TITLE_12 "   　 エキストララブ    "
++#define BGM_TITLE_13 "  戦車むすめのみるゆめ  "
+diff --git a/th02_main.asm b/th02_main.asm
+index 5ca0f1e7..3d44b900 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -549,87 +549,6 @@ main_06_TEXT	ends
+ 
+ 	.data
+ 
+-public _aTH02_02
+-_aTH02_02	db '　 博麗　～Eastern Wind ',0
+-public _aTH02_03
+-_aTH02_03	db '　  She',27h,'s in a temper!! ',0
+-public _aTH02_04
+-_aTH02_04	db '　   End of Daylight　  ',0
+-public _aTH02_05
+-_aTH02_05	db '   　 やみのちから　　  ',0
+-public _aTH02_06
+-_aTH02_06	db '　　　　　幻夢界　　　　',0
+-public _aTH02_07
+-_aTH02_07	db ' 　　　死を賭して　　　 ',0
+-public _aTH02_08
+-_aTH02_08	db 'ひもろぎ、むらさきにもえ',0
+-public _aTH02_09
+-_aTH02_09		db '   　 恋色マジック 　   ',0
+-public _aTH02_10
+-_aTH02_10		db '　東方封魔録　～幽幻乱舞',0
+-public _aTH02_11
+-_aTH02_11	db '   Complete Darkness    ',0
+-public _aTH02_12
+-_aTH02_12	db '   　 エキストララブ    ',0
+-public _aTH02_13
+-_aTH02_13	db '  戦車むすめのみるゆめ  ',0
+-public _aSTAGE1_TITLE
+-_aSTAGE1_TITLE	db '紫野　～ Purple Dawn',0
+-public _aSTAGE2_TITLE
+-_aSTAGE2_TITLE	db '雷獣　～Midnight Rainstorm',0
+-public _aSTAGE3_TITLE
+-_aSTAGE3_TITLE	db '紅夢　～ Scarlet Dream',0
+-public _aSTAGE4_TITLE
+-_aSTAGE4_TITLE	db '霊魔　～Revengeful Ghost',0
+-public _aSTAGE5_TITLE
+-_aSTAGE5_TITLE	db '封魔　～東方封魔録 and ...',0
+-public _aEXTRA_TITLE
+-_aEXTRA_TITLE		db '異空　～for Lunatic Gamers',0
+-; char _aOp[3]
+-public _aOp
+-_aOp		db 'op',0
+-public _aHuuma_efc
+-_aHuuma_efc	db 'huuma.efc',0
+-public _aEye_pi
+-_aEye_pi		db 'EYE.PI',0
+-public _aMiko_bft
+-_aMiko_bft	db 'miko.bft',0
+-public _aMiko32_bft
+-_aMiko32_bft	db 'miko32.bft',0
+-public _aMiko16_bft
+-_aMiko16_bft	db 'miko16.bft',0
+-public _aBmt
+-_aBmt		db 'bmt',0
+-public _aBbt
+-_aBbt		db 'bbt',0
+-public _aMap
+-_aMap		db 'map',0
+-public _aMpn
+-_aMpn		db 'mpn',0
+-public _aM
+-_aM		db 'm',0
+-		db    0
+-		db    0
+-public _aMiko_k_mpn
+-_aMiko_k_mpn	db 'miko_k.mpn',0
+-public _aGAME_QUIT
+-_aGAME_QUIT	db 'ゲーム終了',0
+-public _aGAME_RESUME
+-_aGAME_RESUME	db 'ゲーム再開',0
+-public _aQUIT_PROMPT
+-_aQUIT_PROMPT		db 'ほんとに終了しちゃうの',0
+-public _aQUIT_NO
+-_aQUIT_NO	db 'うそです。すみません。',0
+-public _aQUIT_YES
+-_aQUIT_YES	db '　　はい、やめます。　',0
+-public _aEMPTY
+-_aEMPTY	db '                                                ',0
+-public _aDemo1_rec
+-_aDemo1_rec	db 'DEMO1.REC',0
+-public _aDemo2_rec
+-_aDemo2_rec	db 'DEMO2.REC',0
+-public _aDemo3_rec
+-_aDemo3_rec	db 'DEMO3.REC',0
+ include libs/master.lib/atan8[data].asm
+ include libs/master.lib/bfnt_id[data].asm
+ include libs/master.lib/clip[data].asm

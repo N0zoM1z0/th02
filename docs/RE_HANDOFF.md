@@ -3,7 +3,7 @@
 ## State
 
 - OP.EXE, MAIN.EXE, MAINE.EXE and ZUN.COM are identical to the originals as
-  whole files, from a cold build of the patch series (`session5-cold5`).
+  whole files, from a cold build of the patch series (`session5-cold6`).
 - Work lives on branch `th02-recon` of the ReC98 worktree
   `.analysis/work/rec98` and is exported as `patches/rec98/*.patch`
   (`git format-patch b6ba5b0a52..th02-recon`). `scripts/build_th02.py`
@@ -20,9 +20,13 @@ All ZUN C code in MAIN is C++. What remains assembly:
   target lists its relocations in ascending (TASM) order, and its code
   segment is word-aligned (a `00` pad after stage 3), which TCC never emits.
   The final `damage` reload follows the 16-bit `add` into `score_delta`.
-- master.lib code, and the data of TUs that still declare it `extern`, stay
-  in `th02_main.asm` / `th02/main_dtl.asm`. `main_01a.cpp` and
-  `regist_m.cpp` define their own data; string literals are still extern.
+- `pointnum_put()` and `shots_hittest()` are both preceded by a `00` pad,
+  i.e. word-aligned modules, which TCC never emits.
+- master.lib code and data stay in assembly. ZUN data now defined in its C++
+  TUs (with string literals): `main_01a.cpp`, `main_05.cpp`, `player.cpp`,
+  stage 3, dialog, Rika, Meira, `regist_m.cpp`; `hittest.asm` owns its
+  tables. The rest is still in `th02_main.asm` (up to `spark_accel_x`) and
+  `th02/main_dtl.asm` (Sigma, enemies, Mima, Marisa).
 
 ## Loop
 
@@ -160,6 +164,17 @@ boundaries, which the target's relocation table records:
   only paragraph-aligned, unlike TLINK's `0x3E` layout (UNLZEXE writes this
   layout). `Pipeline/exemin.c` rewrites TLINK's output that way after linking;
   image, relocation order, `SS:SP` and allocation fields stay TLINK's.
+- Moving data into TUs works tail-first: the last ZUN block in
+  `th02_main.asm`'s data belongs to the latest-linked TU still declaring it
+  `extern`, so no new modules are needed. `main_dtl.asm` can be taken apart
+  the same way from its own end.
+- TCC's data order within a TU: variables in definition order (including
+  the anonymous data of local aggregate initializers, at their function),
+  then the literal pool in source order. `const` one-dimensional character
+  arrays join the literal pool (`POWER_RESET_FOR`, the stones' ring orders).
+  Under `-a2`, word-element data and *structs* are word-aligned, so ZUN's
+  byte tables were plain arrays, not `Array<>` (dialog faces).
+- ZUN's `"m\0\0"`: `stage_fn_set_ext()` copies three bytes.
 - Original TUs found this way: `main_01a.cpp` plus the stage loop up to
   `DemoPlay()`; the random number ring; `cfg_load()`; the game over menu;
   `GameExecl()` with `sub_C5B0()`; `player_invalidate()`; bombanim with the

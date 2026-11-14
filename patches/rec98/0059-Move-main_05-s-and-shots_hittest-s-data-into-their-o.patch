@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 23:50:22 +0100
+Subject: [PATCH] Move main_05's and shots_hittest()'s data into their own
+ modules
+
+---
+ th02/main/hittest.asm | 17 ++++++++++++-----
+ th02/main_05.cpp      |  3 +--
+ th02_main.asm         | 11 -----------
+ 3 files changed, 13 insertions(+), 18 deletions(-)
+
+diff --git a/th02/main/hittest.asm b/th02/main/hittest.asm
+index ee70b7ae..80cb5f6d 100644
+--- a/th02/main/hittest.asm
++++ b/th02/main/hittest.asm
+@@ -14,9 +14,16 @@ _DATA	segment word public 'DATA' use16
+ 	extrn _shot_level:byte
+ 	extrn _page_back:byte
+ 	extrn _bombing:byte
+-	extrn _byte_1EB88:byte
+ 	extrn _stage_frame:dword
+ 	extrn _score_delta:dword
++	extrn _shots:byte
++public _SHOT_DAMAGE, _OPTION_SHOT_DAMAGE, _SHOT_DAMAGE_BIG
++_SHOT_DAMAGE	dw 5, 5, 4, 4, 3, 3, 3, 2, 2, 1
++_OPTION_SHOT_DAMAGE	dw 2, 2, 2, 2, 2, 1, 1, 1, 1, 1
++_SHOT_DAMAGE_BIG	dw 0, 0, 8, 8, 7, 7, 6, 5, 4, 3
++		dw 0	; unused
++public _byte_1EB88
++_byte_1EB88	db 1
+ _DATA	ends
+ 
+ DGROUP group _DATA
+@@ -52,11 +59,11 @@ arg_6		= word ptr  0Ah
+ 		mov	bl, _shot_level
+ 		mov	bh, 0
+ 		add	bx, bx
+-		mov	ax, [bx+10DAh]
++		mov	ax, _SHOT_DAMAGE[bx]
+ 		mov	[bp+var_E], ax
+-		mov	ax, [bx+10EEh]
++		mov	ax, _OPTION_SHOT_DAMAGE[bx]
+ 		mov	[bp+var_10], ax
+-		mov	ax, [bx+1102h]
++		mov	ax, _SHOT_DAMAGE_BIG[bx]
+ 		mov	[bp+var_12], ax
+ 		mov	[bp+var_8], 0
+ 		mov	ax, [bp+arg_6]
+@@ -70,7 +77,7 @@ arg_6		= word ptr  0Ah
+ 		add	ax, 0FFF8h
+ 		mov	[bp+var_6], ax
+ 		sub	[bp+arg_6], 8
+-		mov	si, 2908h
++		mov	si, offset _shots
+ 		mov	[bp+var_2], 0
+ 
+ loc_1288F:
+diff --git a/th02/main_05.cpp b/th02/main_05.cpp
+index e2e9280c..c3e77fff 100644
+--- a/th02/main_05.cpp
++++ b/th02/main_05.cpp
+@@ -22,7 +22,6 @@ extern unsigned char stage_formation_scripts[][STAGE_FORMATION_SCRIPT_SIZE];
+ extern uint8_t stage_formation_script_count;
+ extern int16_t far *stage_lines[STAGE_LINE_COLUMNS];
+ extern int stage_line_count;
+-extern char stage_dt1_fn[];
+ 
+ void stage_data_load(void)
+ {
+@@ -35,7 +34,7 @@ void stage_data_load(void)
+ 	unsigned char far *src;
+ 	int i;
+ 
+-	fn = stage_dt1_fn;
++	fn = "STAGE .DT1";
+ 	fn[5] = ('0' + stage_id);
+ 	file_ropen(fn);
+ 	file_read(&size, 4);
+diff --git a/th02_main.asm b/th02_main.asm
+index bf719464..40528b2e 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -775,17 +775,6 @@ _STONES_RING_ORDER_RIGHT	db 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12
+ public _aBoss2_m
+ _aBoss2_m	db 'boss2.m',0
+ 		db 0
+-public _SHOT_DAMAGE, _OPTION_SHOT_DAMAGE, _SHOT_DAMAGE_BIG
+-_SHOT_DAMAGE	dw 5, 5, 4, 4, 3, 3, 3, 2, 2, 1
+-_OPTION_SHOT_DAMAGE	dw 2, 2, 2, 2, 2, 1, 1, 1, 1, 1
+-_SHOT_DAMAGE_BIG	dw 0, 0, 8, 8, 7, 7, 6, 5, 4, 3
+-		db    0
+-		db    0
+-public _byte_1EB88
+-_byte_1EB88	db 1
+-		db 0
+-public _stage_dt1_fn
+-_stage_dt1_fn	db 'STAGE .DT1',0
+ 	.data?
+ 
+ public _stage_progression

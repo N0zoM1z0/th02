@@ -1,0 +1,743 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 23:49:41 +0100
+Subject: [PATCH] Define the data of Rika's, Meira's and the dialog TUs in C++
+
+The dialog face tables were local initializers in the original: their
+anonymous data appears in function order, and only word-element tables
+are word-aligned (-a2), so the byte tables are plain arrays rather than
+Array structs. Array's storage is public so that it can be brace-
+initialized.
+---
+ platform/array.hpp          |   2 +-
+ th02/dialog.cpp             |   2 +-
+ th02/main/boss/meira.cpp    |  12 +-
+ th02/main/boss/rika.cpp     |   9 +-
+ th02/main/dialog/dialog.cpp | 168 ++++++++++++++-----
+ th02/shiftjis/main.hpp      |  13 ++
+ th02_main.asm               | 323 ------------------------------------
+ 7 files changed, 149 insertions(+), 380 deletions(-)
+
+diff --git a/platform/array.hpp b/platform/array.hpp
+index 10e0c2e2..5e41d623 100644
+--- a/platform/array.hpp
++++ b/platform/array.hpp
+@@ -8,7 +8,7 @@ template <class T, size_t N> using Array = std::array<T, N>;
+ template <class T, int N> struct Array {
+ 	typedef int size_type;
+ 
+-private:
++	// Public, so that it can be brace-initialized like ZUN's local arrays.
+ 	T v[N];
+ 
+ public:
+diff --git a/th02/dialog.cpp b/th02/dialog.cpp
+index fb4b5a54..9d3a1e85 100644
+--- a/th02/dialog.cpp
++++ b/th02/dialog.cpp
+@@ -1,2 +1,2 @@
+-#pragma option -zCmain_03_TEXT
++#pragma option -zCmain_03_TEXT -a2
+ #include "th02/main/dialog/dialog.cpp"
+diff --git a/th02/main/boss/meira.cpp b/th02/main/boss/meira.cpp
+index 7b490e6d..3c4fa7a0 100644
+--- a/th02/main/boss/meira.cpp
++++ b/th02/main/boss/meira.cpp
+@@ -86,15 +86,16 @@ extern int meira_step;
+ extern uint8_t meira_phase;
+ extern uint8_t meira_pattern;
+ extern int meira_kill_frame;
+-extern char aBoss4_m[];
+ // -----
+ 
+ // Background
+ // ----------
+ 
+-extern unsigned int stage2_bg_frame;
+-extern unsigned int stage2_lightning_frame;
+-extern bool stage2_bg_clip_reset;
++unsigned int stage2_bg_frame = 0;
++unsigned int stage2_lightning_frame = 0;
++bool stage2_bg_clip_reset = true;
++int midboss2_kill_frame = 0;
++int meira_kill_frame = 0;
+ extern unsigned int stage2_lightning_next;
+ 
+ void pascal near sub_134B6(screen_x_t left, screen_y_t top);
+@@ -148,7 +149,6 @@ void sub_140AE(void)
+ // -------
+ 
+ extern bool16 midboss2_active;
+-extern int midboss2_kill_frame;
+ 
+ int midboss2_invalidate(void)
+ {
+@@ -1049,7 +1049,7 @@ void meira_init(void)
+ 		vram_top -= RES_Y;
+ 	}
+ 	super_roll_put(*boss_left_on_back_page, vram_top, patnum_2064E);
+-	sub_13ABB(aBoss4_m);
++	sub_13ABB("boss4.m");
+ 	palette_white_in(1);
+ 	dialog_script_generic_part_animate(DS_PREBOSS);
+ 	dialog_post();
+diff --git a/th02/main/boss/rika.cpp b/th02/main/boss/rika.cpp
+index dba350dc..7dfbe2bf 100644
+--- a/th02/main/boss/rika.cpp
++++ b/th02/main/boss/rika.cpp
+@@ -74,7 +74,7 @@ struct stage1_particle_t {
+ static const int STAGE1_PARTICLE_COUNT = 50;
+ 
+ extern stage1_particle_t stage1_particles[STAGE1_PARTICLE_COUNT];
+-extern int stage1_bg_frame;
++int stage1_bg_frame = 0;
+ 
+ void pascal near sub_134B6(screen_x_t left, screen_y_t top)
+ {
+@@ -196,7 +196,7 @@ void sub_13671(void)
+ 
+ extern bool16 midboss1_active;
+ extern int midboss1_patnum;
+-extern int midboss1_kill_frame;
++int midboss1_kill_frame = 0;
+ 
+ int midboss1_invalidate(void)
+ {
+@@ -385,14 +385,13 @@ void sub_13ABB(char far *fn)
+ 
+ extern screen_point_t rika_topleft;
+ extern int rika_phase;
+-extern int rika_kill_frame;
++int rika_kill_frame = 0;
+ extern unsigned int rika_frame;
+ extern unsigned char rika_angle;
+-extern char aBoss1_m[];
+ 
+ void rika_init(void)
+ {
+-	sub_13ABB(aBoss1_m);
++	sub_13ABB("boss1.m");
+ 	dialog_pre();
+ 	dialog_script_generic_part_animate(DS_PREBOSS);
+ 	dialog_post();
+diff --git a/th02/main/dialog/dialog.cpp b/th02/main/dialog/dialog.cpp
+index 8fd0f515..049085e0 100644
+--- a/th02/main/dialog/dialog.cpp
++++ b/th02/main/dialog/dialog.cpp
+@@ -19,6 +19,7 @@
+ #include "th02/main/player/player.hpp"
+ #include "th02/main/tile/tile.hpp"
+ #include "th02/sprites/face.hpp"
++#include "th02/shiftjis/main.hpp"
+ 
+ // Coordinates
+ // -----------
+@@ -58,10 +59,11 @@ extern bool restore_tile_mode_none_at_post;
+ // Core system
+ // -----------
+ 
++const char near* LINE_BLANK = DIALOG_LINE_BLANK;
++
+ void dialog_load_and_init(void)
+ {
+-	extern char dialog_fn[];
+-	char* fn = dialog_fn;
++	char* fn = "stage .txt";
+ 	fn[5] = ('0' + stage_id);
+ 
+ 	file_ropen(fn);
+@@ -324,8 +326,7 @@ void pascal near dialog_text_put(
+ 	// ZUN landmine: master.lib has text_putnsa() for this purpose, which works
+ 	// without copying the string and risking a buffer overflow in the process,
+ 	// or wasting 40 bytes of conventional RAM on \0 bytes.
+-	extern const Array<shiftjis_t, DIALOG_LINE_SIZE> clear_bytes;
+-	Array<shiftjis_t, DIALOG_LINE_SIZE> buf = clear_bytes;
++	Array<shiftjis_t, DIALOG_LINE_SIZE> buf = { 0 };
+ 	for(int i = 0; i < n; i++) {
+ 		buf[i] = str[i];
+ 	}
+@@ -334,7 +335,6 @@ void pascal near dialog_text_put(
+ }
+ 
+ inline void near dialog_box_wipe(void) {
+-	extern const char near* LINE_BLANK;
+ 
+ 	static_assert(DIALOG_BOX_LINES == 2);
+ 	text_putsa(TEXT_TRAM_LEFT, (TEXT_TRAM_TOP + 0), LINE_BLANK, TX_WHITE);
+@@ -398,20 +398,87 @@ void pascal near dialog_box_animate_and_advance(
+ // ZUN bloat: All face ID arrays in this section should have been `static
+ // const` to avoid the useless copy.
+ 
++#define face_count(face_id_array) \
++	(sizeof(face_id_array) / sizeof(face_id_array[0]))
++
+ #define boxes_animate(face_id_array) { \
+-	for(int i = 0; i < face_id_array.count(); i++) { \
++	for(int i = 0; i < face_count(face_id_array); i++) { \
+ 		dialog_box_animate_and_advance(face_id_array[i]); \
+ 	} \
+ }
+ 
++extern const uint8_t GENERIC_BOX_COUNTS[TOTAL_STAGE_COUNT][DS_COUNT] = {
++	{ 16, 8 },
++	{ 22, 11 },
++	{ 8, 3 },
++	{ 16, 4 },
++	{ 0, 0 },
++	{ 22, 6 },
++};
++
++extern const face_tile_topleft_t GENERIC_FACES[
++	(TOTAL_STAGE_COUNT * DS_COUNT)
++][22] = {
++	{
++		FACE_REIMU_NEUTRAL, FACE_GENJII, FACE_REIMU_CRY, FACE_GENJII,
++		FACE_REIMU_JOY, FACE_GENJII, FACE_REIMU_NEUTRAL, FACE_GENJII,
++		FACE_RIKA, FACE_RIKA, FACE_REIMU_FALL, FACE_REIMU_FROWN,
++		FACE_RIKA, FACE_RIKA, FACE_REIMU_ANGRY, FACE_RIKA,
++	},
++	{
++		FACE_RIKA, FACE_RIKA, FACE_REIMU_SWEAT, FACE_GENJII,
++		FACE_REIMU_HUSHED, FACE_RIKA, FACE_REIMU_JOY, FACE_GENJII,
++	},
++	{
++		FACE_MEIRA_NEUTRAL, FACE_MEIRA_NEUTRAL, FACE_REIMU_SWEAT, FACE_REIMU_FLIRTY,
++		FACE_MEIRA_NEUTRAL, FACE_MEIRA_NEUTRAL, FACE_REIMU_FLIRTY, FACE_REIMU_JOY,
++		FACE_MEIRA_SWEAT, FACE_REIMU_QUESTION, FACE_MEIRA_NEUTRAL, FACE_MEIRA_NEUTRAL,
++		FACE_GENJII, FACE_REIMU_QUESTION, FACE_MEIRA_NEUTRAL, FACE_REIMU_FLIRTY,
++		FACE_REIMU_JOY, FACE_MEIRA_NEUTRAL, FACE_REIMU_JOY, FACE_MEIRA_SWEAT,
++		FACE_REIMU_SWEAT, FACE_MEIRA_SWEAT,
++	},
++	{
++		FACE_REIMU_JOY, FACE_REIMU_QUESTION, FACE_REIMU_SWEAT, FACE_REIMU_JOY,
++		FACE_GENJII, FACE_MEIRA_SWEAT, FACE_REIMU_SWEAT, FACE_GENJII,
++		FACE_REIMU_QUESTION, FACE_GENJII, FACE_REIMU_FROWN,
++	},
++	{
++		FACE_REIMU_ANGRY, FACE_GENJII, FACE_GENJII, FACE_REIMU_FROWN,
++		FACE_GENJII, FACE_REIMU_CRY, FACE_GENJII, FACE_REIMU_NEUTRAL,
++	},
++	{
++		FACE_REIMU_FROWN, FACE_GENJII, FACE_REIMU_FROWN,
++	},
++	{
++		FACE_MIMA_SMILE, FACE_REIMU_ANGRY, FACE_GENJII, FACE_REIMU_FROWN,
++		FACE_REIMU_ANGRY, FACE_REIMU_ANGRY, FACE_MIMA_SMILE, FACE_MIMA_SMILE,
++		FACE_REIMU_FROWN, FACE_GENJII, FACE_REIMU_ANGRY, FACE_REIMU_ANGRY,
++		FACE_MIMA_SMILE, FACE_MIMA_SMILE, FACE_MIMA_SMILE, FACE_MIMA_SMILE,
++	},
++	{
++		FACE_MARISA_FROWN, FACE_REIMU_NEUTRAL, FACE_GENJII, FACE_REIMU_NEUTRAL,
++	},
++	{ 0 },
++	{ 0 },
++	{
++		FACE_EXRIKA_SMILE, FACE_REIMU_NEUTRAL, FACE_EXRIKA_SMILE, FACE_REIMU_HUSHED,
++		FACE_EXRIKA_SMILE, FACE_REIMU_ANGRY, FACE_EXRIKA_SMILE, FACE_EXRIKA_SMILE,
++		FACE_EXRIKA_SMILE, FACE_REIMU_SWEAT, FACE_EXRIKA_SMILE, FACE_REIMU_SWEAT,
++		FACE_EXRIKA_SMILE, FACE_REIMU_SWEAT, FACE_EXRIKA_SMILE, FACE_EXRIKA_SMILE,
++		FACE_REIMU_SWEAT, FACE_EXRIKA_SMILE, FACE_REIMU_FROWN, FACE_GENJII,
++		FACE_REIMU_FROWN, FACE_EXRIKA_SMILE,
++	},
++	{
++		FACE_REIMU_JOY, FACE_EXRIKA_FROWN, FACE_REIMU_JOY, FACE_GENJII,
++		FACE_GENJII, FACE_REIMU_FROWN,
++	},
++};
++
+ void pascal near dialog_script_generic_part_animate(dialog_sequence_t sequence)
+ {
+ 	enum {
+ 		STAGE_SEQUENCE_COUNT = (TOTAL_STAGE_COUNT * DS_COUNT),
+ 	};
+-	extern const uint8_t GENERIC_BOX_COUNTS[TOTAL_STAGE_COUNT][DS_COUNT];
+-	extern const face_tile_topleft_t GENERIC_FACES[STAGE_SEQUENCE_COUNT][22];
+-
+ 	int stage_and_sequence = ((stage_id * DS_COUNT) + sequence);
+ 	for(int i = 0; i < GENERIC_BOX_COUNTS[stage_id][sequence]; i++) {
+ 		dialog_box_animate_and_advance(GENERIC_FACES[stage_and_sequence][i]);
+@@ -426,17 +493,19 @@ void near dialog_script_stage2_pre_intro_animate(void)
+ 
+ void near dialog_script_stage4_pre_intro_animate(void)
+ {
+-	typedef Array<face_tile_topleft_t, 8> T1;
+-	extern const T1 STAGE4_PREBOSS_INTRO_FACES;
+-	const T1 FACES = STAGE4_PREBOSS_INTRO_FACES;
++	const face_tile_topleft_t FACES[8] = {
++		FACE_REIMU_SWEAT, FACE_GENJII, FACE_GENJII, FACE_REIMU_SWEAT, FACE_GENJII, FACE_REIMU_SWEAT, FACE_GENJII, FACE_REIMU_SWEAT
++	};
+ 	boxes_animate(FACES);
+ }
+ 
+ void near dialog_script_stage4_pre_marisa_animate(void)
+ {
+-	typedef Array<face_tile_topleft_t, 11> T1;
+-	extern const T1 STAGE4_PREBOSS_MARISA_FACES;
+-	const T1 FACES = STAGE4_PREBOSS_MARISA_FACES;
++	const face_tile_topleft_t FACES[11] = {
++		FACE_REIMU_SWEAT, FACE_MARISA_SMILE, FACE_REIMU_ANGRY, FACE_MARISA_SMILE,
++		FACE_MARISA_SMILE, FACE_MARISA_SMILE, FACE_REIMU_ANGRY, FACE_MARISA_SMILE,
++		FACE_GENJII, FACE_REIMU_NEUTRAL, FACE_GENJII,
++	};
+ 	boxes_animate(FACES);
+ 	dialog_box_wipe();
+ }
+@@ -447,15 +516,20 @@ void near dialog_script_stage4_post_animate(void)
+ 	typedef Array<int /* ACTUAL TYPE: face_tile_topleft_t */, 3> T2;
+ 	typedef Array<int /* ACTUAL TYPE: face_tile_topleft_t */, 5> T3;
+ 
+-	extern const T1 STAGE4_POSTBOSS_CONTINUED_NUMERALS;
+-	extern const T2 STAGE4_POSTBOSS_CONTINUED_BEFORE_FACES;
+-	extern const T3 STAGE4_POSTBOSS_CONTINUED_AFTER_FACES;
+-	extern const T3 STAGE4_POSTBOSS_NOTCONTINUED_FACES;
+-
+-	const T1 CONTINUED_NUMERALS = STAGE4_POSTBOSS_CONTINUED_NUMERALS;
+-	const T2 CONTINUED_BEFORE_BOX_FACE = STAGE4_POSTBOSS_CONTINUED_BEFORE_FACES;
+-	const T3 CONTINUED_AFTER_BOX_FACE = STAGE4_POSTBOSS_CONTINUED_AFTER_FACES;
+-	const T3 NOTCONTINUED_BOX_FACE = STAGE4_POSTBOSS_NOTCONTINUED_FACES;
++	const T1 CONTINUED_NUMERALS = {
++		FW_0, FW_1, FW_2, FW_3, FW_4, FW_5, FW_6, FW_7, FW_8, FW_9,
++	};
++	const T2 CONTINUED_BEFORE_BOX_FACE = {
++		FACE_GENJII, FACE_REIMU_QUESTION, FACE_MARISA_SMILE,
++	};
++	const T3 CONTINUED_AFTER_BOX_FACE = {
++		FACE_MARISA_SMILE, FACE_REIMU_FROWN, FACE_GENJII, FACE_REIMU_SWEAT,
++		FACE_MARISA_SMILE,
++	};
++	const T3 NOTCONTINUED_BOX_FACE = {
++		FACE_GENJII, FACE_GENJII, FACE_REIMU_SWEAT, FACE_GENJII,
++		FACE_REIMU_SWEAT,
++	};
+ 
+ 	dialog_script_generic_part_animate(DS_POSTBOSS);
+ 	if(resident->continues_used) {
+@@ -492,23 +566,30 @@ void near dialog_script_stage5_pre_intro_animate(void)
+ 
+ void near dialog_script_stage5_pre_unsealed_animate(void)
+ {
+-	typedef Array<face_tile_topleft_t, 22> T1;
+-	typedef Array<face_tile_topleft_t, 17> T2;
+-
+-	extern const T1 STAGE5_PREBOSS_CONTINUED_FACES;
+-	extern const T2 STAGE5_PREBOSS_NOTCONTINUED_FACES;
+-
+-	const T1 CONTINUED_FACES = STAGE5_PREBOSS_CONTINUED_FACES;
+-	const T2 NOTCONTINUED_FACES = STAGE5_PREBOSS_NOTCONTINUED_FACES;
++	const face_tile_topleft_t CONTINUED_FACES[22] = {
++		FACE_MIMA_SMILE, FACE_REIMU_SWEAT, FACE_MIMA_SMILE, FACE_REIMU_ANGRY,
++		FACE_REIMU_ANGRY, FACE_MIMA_SMILE, FACE_MIMA_SMILE, FACE_REIMU_ANGRY,
++		FACE_MIMA_SMILE, FACE_REIMU_ANGRY, FACE_REIMU_ANGRY, FACE_GENJII,
++		FACE_REIMU_ANGRY, FACE_MIMA_SMILE, FACE_REIMU_SWEAT, FACE_MIMA_SMILE,
++		FACE_REIMU_NEUTRAL, FACE_GENJII, FACE_REIMU_ANGRY, FACE_REIMU_ANGRY,
++		FACE_MIMA_SMILE, FACE_MIMA_SMILE,
++	};
++	const face_tile_topleft_t NOTCONTINUED_FACES[17] = {
++		FACE_MIMA_SMILE, FACE_REIMU_NEUTRAL, FACE_MIMA_SMILE, FACE_REIMU_ANGRY,
++		FACE_MIMA_SMILE, FACE_MIMA_SMILE, FACE_MIMA_SMILE, FACE_MIMA_SMILE,
++		FACE_MIMA_SMILE, FACE_REIMU_ANGRY, FACE_MIMA_SMILE, FACE_MIMA_SMILE,
++		FACE_MIMA_SMILE, FACE_REIMU_ANGRY, FACE_REIMU_ANGRY, FACE_MIMA_SMILE,
++		FACE_MIMA_SMILE,
++	};
+ 
+ 	dialog_box_animate_and_advance(FACE_REIMU_ANGRY);
+ 	dialog_box_animate_and_advance(FACE_MIMA_SMILE);
+ 
+ 	if(resident->continues_used) {
+ 		boxes_animate(CONTINUED_FACES);
+-		dialog_box_cur += NOTCONTINUED_FACES.count();
++		dialog_box_cur += face_count(NOTCONTINUED_FACES);
+ 	} else {
+-		dialog_box_cur += CONTINUED_FACES.count();
++		dialog_box_cur += face_count(CONTINUED_FACES);
+ 		boxes_animate(NOTCONTINUED_FACES);
+ 	}
+ }
+@@ -520,23 +601,22 @@ void near dialog_script_stage5_pre_winged_animate(void)
+ 
+ void near dialog_script_stage5_form1defeat_animate(void)
+ {
+-	typedef Array<face_tile_topleft_t, 5> T1;
+-	typedef Array<face_tile_topleft_t, 4> T2;
+-
+-	extern const T1 STAGE5_FORM1DEFEAT_CONTINUED_FACES;
+-	extern const T2 STAGE5_FORM1DEFEAT_NOTCONTINUED_FACES;
+-
+-	const T1 CONTINUED_FACES = STAGE5_FORM1DEFEAT_CONTINUED_FACES;
+-	const T2 NOTCONTINUED_FACES = STAGE5_FORM1DEFEAT_NOTCONTINUED_FACES;
++	const face_tile_topleft_t CONTINUED_FACES[5] = {
++		FACE_MIMA_SMILE, FACE_MIMA_SMILE, FACE_REIMU_ANGRY, FACE_MIMA_SMILE,
++		FACE_REIMU_SWEAT,
++	};
++	const face_tile_topleft_t NOTCONTINUED_FACES[4] = {
++		FACE_MIMA_FROWN, FACE_REIMU_ANGRY, FACE_MIMA_FROWN, FACE_REIMU_FROWN,
++	};
+ 
+ 	if(resident->continues_used) {
+ 		boxes_animate(CONTINUED_FACES);
+ 		// MODDERS: Skipping over the boxes for the non-continued part would
+ 		// have been the sensible thing to do, but the game ends after this
+ 		// sequence anyway.
+-		// dialog_box_cur += NOTCONTINUED_FACES.count();
++		// dialog_box_cur += face_count(NOTCONTINUED_FACES);
+ 	} else {
+-		dialog_box_cur += CONTINUED_FACES.count();
++		dialog_box_cur += face_count(CONTINUED_FACES);
+ 		boxes_animate(NOTCONTINUED_FACES);
+ 	}
+ }
+diff --git a/th02/shiftjis/main.hpp b/th02/shiftjis/main.hpp
+index 97dc0938..2aad75a4 100644
+--- a/th02/shiftjis/main.hpp
++++ b/th02/shiftjis/main.hpp
+@@ -25,3 +25,16 @@
+ #define BGM_TITLE_11 "   Complete Darkness    "
+ #define BGM_TITLE_12 "   Å@ ÉGÉLÉXÉgÉâÉâÉu    "
+ #define BGM_TITLE_13 "  êÌé‘ÇﬁÇ∑ÇﬂÇÃÇ›ÇÈÇ‰Çﬂ  "
++
++// Dialog
++#define DIALOG_LINE_BLANK "Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@"
++#define FW_0 "ÇO"
++#define FW_1 "ÇP"
++#define FW_2 "ÇQ"
++#define FW_3 "ÇR"
++#define FW_4 "ÇS"
++#define FW_5 "ÇT"
++#define FW_6 "ÇU"
++#define FW_7 "ÇV"
++#define FW_8 "ÇW"
++#define FW_9 "ÇX"
+diff --git a/th02_main.asm b/th02_main.asm
+index 3d44b900..bf719464 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -786,329 +786,6 @@ _byte_1EB88	db 1
+ 		db 0
+ public _stage_dt1_fn
+ _stage_dt1_fn	db 'STAGE .DT1',0
+-		db 0
+-public _LINE_BLANK, _clear_bytes
+-_LINE_BLANK 	dw aLINE_BLANK
+-_clear_bytes	db DIALOG_LINE_SIZE dup(0)
+-
+-public _GENERIC_BOX_COUNTS
+-_GENERIC_BOX_COUNTS label byte
+-	db  16,  8	; Stage 1
+-	db  22, 11	; Stage 2
+-	db   8,  3	; Stage 3
+-	db  16,  4	; Stage 4
+-	db   0,  0	; Stage 5 (unused, not generic)
+-	db  22,  6	; Extra Stage
+-
+-BOX_COUNT_MAX = 22
+-
+-public _GENERIC_FACES
+-_GENERIC_FACES label byte
+-	; Stage	1, pre-boss
+-	db FACE_REIMU_NEUTRAL	;  0
+-	db FACE_GENJII       	;  1
+-	db FACE_REIMU_CRY    	;  2
+-	db FACE_GENJII       	;  3
+-	db FACE_REIMU_JOY    	;  4
+-	db FACE_GENJII       	;  5
+-	db FACE_REIMU_NEUTRAL	;  6
+-	db FACE_GENJII       	;  7
+-	db FACE_RIKA         	;  8
+-	db FACE_RIKA         	;  9
+-	db FACE_REIMU_FALL   	; 10
+-	db FACE_REIMU_FROWN  	; 11
+-	db FACE_RIKA         	; 12
+-	db FACE_RIKA         	; 13
+-	db FACE_REIMU_ANGRY  	; 14
+-	db FACE_RIKA         	; 15
+-	db (BOX_COUNT_MAX - 16) dup(0)
+-
+-	; Stage	1, post-boss
+-	db FACE_RIKA        	; 0
+-	db FACE_RIKA        	; 1
+-	db FACE_REIMU_SWEAT 	; 2
+-	db FACE_GENJII      	; 3
+-	db FACE_REIMU_HUSHED	; 4
+-	db FACE_RIKA        	; 5
+-	db FACE_REIMU_JOY   	; 6
+-	db FACE_GENJII      	; 7
+-	db (BOX_COUNT_MAX - 8) dup(0)
+-
+-	; Stage	2, pre-boss
+-	db FACE_MEIRA_NEUTRAL 	;  0
+-	db FACE_MEIRA_NEUTRAL 	;  1
+-	db FACE_REIMU_SWEAT   	;  2
+-	db FACE_REIMU_FLIRTY  	;  3
+-	db FACE_MEIRA_NEUTRAL 	;  4
+-	db FACE_MEIRA_NEUTRAL 	;  5
+-	db FACE_REIMU_FLIRTY  	;  6
+-	db FACE_REIMU_JOY     	;  7
+-	db FACE_MEIRA_SWEAT   	;  8
+-	db FACE_REIMU_QUESTION	;  9
+-	db FACE_MEIRA_NEUTRAL 	; 10
+-	db FACE_MEIRA_NEUTRAL 	; 11
+-	db FACE_GENJII        	; 12
+-	db FACE_REIMU_QUESTION	; 13
+-	db FACE_MEIRA_NEUTRAL 	; 14
+-	db FACE_REIMU_FLIRTY  	; 15
+-	db FACE_REIMU_JOY     	; 16
+-	db FACE_MEIRA_NEUTRAL 	; 17
+-	db FACE_REIMU_JOY     	; 18
+-	db FACE_MEIRA_SWEAT   	; 19
+-	db FACE_REIMU_SWEAT   	; 20
+-	db FACE_MEIRA_SWEAT   	; 21
+-
+-	; Stage	2, post-boss
+-	db FACE_REIMU_JOY     	;  0
+-	db FACE_REIMU_QUESTION	;  1
+-	db FACE_REIMU_SWEAT   	;  2
+-	db FACE_REIMU_JOY     	;  3
+-	db FACE_GENJII        	;  4
+-	db FACE_MEIRA_SWEAT   	;  5
+-	db FACE_REIMU_SWEAT   	;  6
+-	db FACE_GENJII        	;  7
+-	db FACE_REIMU_QUESTION	;  8
+-	db FACE_GENJII        	;  9
+-	db FACE_REIMU_FROWN   	; 10
+-	db (BOX_COUNT_MAX - 11) dup(0)
+-
+-	; Stage	3, pre-boss
+-	db FACE_REIMU_ANGRY  	; 0
+-	db FACE_GENJII       	; 1
+-	db FACE_GENJII       	; 2
+-	db FACE_REIMU_FROWN  	; 3
+-	db FACE_GENJII       	; 4
+-	db FACE_REIMU_CRY    	; 5
+-	db FACE_GENJII       	; 6
+-	db FACE_REIMU_NEUTRAL	; 7
+-	db (BOX_COUNT_MAX - 8) dup(0)
+-
+-	; Stage	3, post-boss
+-	db FACE_REIMU_FROWN	; 0
+-	db FACE_GENJII     	; 1
+-	db FACE_REIMU_FROWN	; 2
+-	db (BOX_COUNT_MAX - 3) dup(0)
+-
+-	; Stage	4, pre-boss
+-	db FACE_MIMA_SMILE 	;  0
+-	db FACE_REIMU_ANGRY	;  1
+-	db FACE_GENJII     	;  2
+-	db FACE_REIMU_FROWN	;  3
+-	db FACE_REIMU_ANGRY	;  4
+-	db FACE_REIMU_ANGRY	;  5
+-	db FACE_MIMA_SMILE 	;  6
+-	db FACE_MIMA_SMILE 	;  7
+-	db FACE_REIMU_FROWN	;  8
+-	db FACE_GENJII     	;  9
+-	db FACE_REIMU_ANGRY	; 10
+-	db FACE_REIMU_ANGRY	; 11
+-	db FACE_MIMA_SMILE 	; 12
+-	db FACE_MIMA_SMILE 	; 13
+-	db FACE_MIMA_SMILE 	; 14
+-	db FACE_MIMA_SMILE 	; 15
+-	db (BOX_COUNT_MAX - 16) dup(0)
+-
+-	; Stage	4, post-boss
+-	db FACE_MARISA_FROWN 	; 0
+-	db FACE_REIMU_NEUTRAL	; 1
+-	db FACE_GENJII       	; 2
+-	db FACE_REIMU_NEUTRAL	; 3
+-	db (BOX_COUNT_MAX - 4) dup(0)
+-
+-	; Stage	5, pre-boss (unused)
+-	db BOX_COUNT_MAX dup(0)
+-
+-	; Stage	5, post-boss (unused)
+-	db BOX_COUNT_MAX dup(0)
+-
+-	; Extra	Stage, pre-boss
+-	db FACE_EXRIKA_SMILE 	;  0
+-	db FACE_REIMU_NEUTRAL	;  1
+-	db FACE_EXRIKA_SMILE 	;  2
+-	db FACE_REIMU_HUSHED 	;  3
+-	db FACE_EXRIKA_SMILE 	;  4
+-	db FACE_REIMU_ANGRY  	;  5
+-	db FACE_EXRIKA_SMILE 	;  6
+-	db FACE_EXRIKA_SMILE 	;  7
+-	db FACE_EXRIKA_SMILE 	;  8
+-	db FACE_REIMU_SWEAT  	;  9
+-	db FACE_EXRIKA_SMILE 	; 10
+-	db FACE_REIMU_SWEAT  	; 11
+-	db FACE_EXRIKA_SMILE 	; 12
+-	db FACE_REIMU_SWEAT  	; 13
+-	db FACE_EXRIKA_SMILE 	; 14
+-	db FACE_EXRIKA_SMILE 	; 15
+-	db FACE_REIMU_SWEAT  	; 16
+-	db FACE_EXRIKA_SMILE 	; 17
+-	db FACE_REIMU_FROWN  	; 18
+-	db FACE_GENJII       	; 19
+-	db FACE_REIMU_FROWN  	; 20
+-	db FACE_EXRIKA_SMILE 	; 21
+-
+-	; Extra	Stage, post-boss
+-	db FACE_REIMU_JOY   	; 0
+-	db FACE_EXRIKA_FROWN	; 1
+-	db FACE_REIMU_JOY   	; 2
+-	db FACE_GENJII      	; 3
+-	db FACE_GENJII      	; 4
+-	db FACE_REIMU_FROWN 	; 5
+-	db (BOX_COUNT_MAX - 6) dup(0)
+-
+-public _STAGE4_PREBOSS_INTRO_FACES
+-_STAGE4_PREBOSS_INTRO_FACES label byte
+-	db FACE_REIMU_SWEAT	; 0
+-	db FACE_GENJII     	; 1
+-	db FACE_GENJII     	; 2
+-	db FACE_REIMU_SWEAT	; 3
+-	db FACE_GENJII     	; 4
+-	db FACE_REIMU_SWEAT	; 5
+-	db FACE_GENJII     	; 6
+-	db FACE_REIMU_SWEAT	; 7
+-
+-public _STAGE4_PREBOSS_MARISA_FACES
+-_STAGE4_PREBOSS_MARISA_FACES label byte
+-	db FACE_REIMU_SWEAT 	;  0
+-	db FACE_MARISA_SMILE	;  1
+-	db FACE_REIMU_ANGRY 	;  2
+-	db FACE_MARISA_SMILE	;  3
+-	db FACE_MARISA_SMILE	;  4
+-	db FACE_MARISA_SMILE	;  5
+-	db FACE_REIMU_ANGRY 	;  6
+-	db FACE_MARISA_SMILE	;  7
+-	db FACE_GENJII      	;  8
+-	db FACE_REIMU_NEUTRAL	;  9
+-	db FACE_GENJII      	; 10
+-	db FACE_REIMU_NEUTRAL	; 11
+-
+-public _STAGE4_POSTBOSS_CONTINUED_NUMERA
+-_STAGE4_POSTBOSS_CONTINUED_NUMERA label word
+-	dw offset aFW_0
+-	dw offset aFW_1
+-	dw offset aFW_2
+-	dw offset aFW_3
+-	dw offset aFW_4
+-	dw offset aFW_5
+-	dw offset aFW_6
+-	dw offset aFW_7
+-	dw offset aFW_8
+-	dw offset aFW_9
+-
+-public _STAGE4_POSTBOSS_CONTINUED_BEFORE
+-_STAGE4_POSTBOSS_CONTINUED_BEFORE label word
+-	dw FACE_GENJII        	; 0
+-	dw FACE_REIMU_QUESTION	; 1
+-	dw FACE_MARISA_SMILE  	; 2
+-
+-public _STAGE4_POSTBOSS_CONTINUED_AFTER_
+-_STAGE4_POSTBOSS_CONTINUED_AFTER_ label word
+-	dw FACE_MARISA_SMILE	; 0
+-	dw FACE_REIMU_FROWN 	; 1
+-	dw FACE_GENJII      	; 2
+-	dw FACE_REIMU_SWEAT 	; 3
+-	dw FACE_MARISA_SMILE	; 4
+-
+-public _STAGE4_POSTBOSS_NOTCONTINUED_FAC
+-_STAGE4_POSTBOSS_NOTCONTINUED_FAC label word
+-	dw FACE_GENJII     	; 0
+-	dw FACE_GENJII     	; 1
+-	dw FACE_REIMU_SWEAT	; 2
+-	dw FACE_GENJII     	; 3
+-	dw FACE_REIMU_SWEAT	; 4
+-
+-public _STAGE5_PREBOSS_CONTINUED_FACES
+-_STAGE5_PREBOSS_CONTINUED_FACES label byte
+-	db FACE_MIMA_SMILE   	;  0
+-	db FACE_REIMU_SWEAT  	;  1
+-	db FACE_MIMA_SMILE   	;  2
+-	db FACE_REIMU_ANGRY  	;  3
+-	db FACE_REIMU_ANGRY  	;  4
+-	db FACE_MIMA_SMILE   	;  5
+-	db FACE_MIMA_SMILE   	;  6
+-	db FACE_REIMU_ANGRY  	;  7
+-	db FACE_MIMA_SMILE   	;  8
+-	db FACE_REIMU_ANGRY  	;  9
+-	db FACE_REIMU_ANGRY  	; 10
+-	db FACE_GENJII       	; 11
+-	db FACE_REIMU_ANGRY  	; 12
+-	db FACE_MIMA_SMILE   	; 13
+-	db FACE_REIMU_SWEAT  	; 14
+-	db FACE_MIMA_SMILE   	; 15
+-	db FACE_REIMU_NEUTRAL	; 16
+-	db FACE_GENJII       	; 17
+-	db FACE_REIMU_ANGRY  	; 18
+-	db FACE_REIMU_ANGRY  	; 19
+-	db FACE_MIMA_SMILE   	; 20
+-	db FACE_MIMA_SMILE   	; 21
+-
+-public _STAGE5_PREBOSS_NOTCONTINUED_FACE
+-_STAGE5_PREBOSS_NOTCONTINUED_FACE label byte
+-	db FACE_MIMA_SMILE   	;  0
+-	db FACE_REIMU_NEUTRAL	;  1
+-	db FACE_MIMA_SMILE   	;  2
+-	db FACE_REIMU_ANGRY  	;  3
+-	db FACE_MIMA_SMILE   	;  4
+-	db FACE_MIMA_SMILE   	;  5
+-	db FACE_MIMA_SMILE   	;  6
+-	db FACE_MIMA_SMILE   	;  7
+-	db FACE_MIMA_SMILE   	;  8
+-	db FACE_REIMU_ANGRY  	;  9
+-	db FACE_MIMA_SMILE   	; 10
+-	db FACE_MIMA_SMILE   	; 11
+-	db FACE_MIMA_SMILE   	; 12
+-	db FACE_REIMU_ANGRY  	; 13
+-	db FACE_REIMU_ANGRY  	; 14
+-	db FACE_MIMA_SMILE   	; 15
+-	db FACE_MIMA_SMILE   	; 16
+-
+-public _STAGE5_FORM1DEFEAT_CONTINUED_FAC
+-_STAGE5_FORM1DEFEAT_CONTINUED_FAC label byte
+-	db FACE_MIMA_SMILE 	; 0
+-	db FACE_MIMA_SMILE 	; 1
+-	db FACE_REIMU_ANGRY	; 2
+-	db FACE_MIMA_SMILE 	; 3
+-	db FACE_REIMU_SWEAT	; 4
+-
+-public _STAGE5_FORM1DEFEAT_NOTCONTINUED_
+-_STAGE5_FORM1DEFEAT_NOTCONTINUED_ label byte
+-	db FACE_MIMA_FROWN 	; 0
+-	db FACE_REIMU_ANGRY	; 1
+-	db FACE_MIMA_FROWN 	; 2
+-	db FACE_REIMU_FROWN	; 3
+-
+-aLINE_BLANK	db 'Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@Å@', 0
+-public _dialog_fn
+-_dialog_fn	db 'stage .txt',0
+-aFW_0	db 'ÇO', 0
+-aFW_1	db 'ÇP', 0
+-aFW_2	db 'ÇQ', 0
+-aFW_3	db 'ÇR', 0
+-aFW_4	db 'ÇS', 0
+-aFW_5	db 'ÇT', 0
+-aFW_6	db 'ÇU', 0
+-aFW_7	db 'ÇV', 0
+-aFW_8	db 'ÇW', 0
+-aFW_9	db 'ÇX', 0
+-public _stage1_bg_frame
+-_stage1_bg_frame	dw 0
+-public _midboss1_kill_frame
+-_midboss1_kill_frame	dw 0
+-public _rika_kill_frame
+-_rika_kill_frame	dw 0
+-public _aBoss1_m
+-_aBoss1_m	db 'boss1.m',0
+-public _stage2_bg_frame
+-_stage2_bg_frame	dw 0
+-public _stage2_lightning_frame
+-_stage2_lightning_frame	dw 0
+-public _stage2_bg_clip_reset
+-_stage2_bg_clip_reset	db 1
+-		db 0
+-public _midboss2_kill_frame
+-_midboss2_kill_frame	dw 0
+-public _meira_kill_frame
+-_meira_kill_frame	dw 0
+-public _aBoss4_m
+-_aBoss4_m	db 'boss4.m',0
+ 	.data?
+ 
+ public _stage_progression
