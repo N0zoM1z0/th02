@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:28:48 +0100
+Subject: [PATCH] Define main_05's uninitialized variables in C++
+
+---
+ th02/main_05.cpp | 9 ++++++---
+ th02_main.asm    | 7 -------
+ 2 files changed, 6 insertions(+), 10 deletions(-)
+
+diff --git a/th02/main_05.cpp b/th02/main_05.cpp
+index c3e77fff..90b1c692 100644
+--- a/th02/main_05.cpp
++++ b/th02/main_05.cpp
+@@ -17,12 +17,15 @@
+ 
+ static const int STAGE_FORMATION_SCRIPT_SIZE = 64;
+ static const int STAGE_LINE_COLUMNS = 49;
+-
+-extern unsigned char stage_formation_scripts[][STAGE_FORMATION_SCRIPT_SIZE];
+-extern uint8_t stage_formation_script_count;
+ extern int16_t far *stage_lines[STAGE_LINE_COLUMNS];
+ extern int stage_line_count;
+ 
++// Uninitialized data, in the original order
++int map_length;
++uint8_t map_unused; // ZUN bloat
++uint8_t stage_formation_script_count;
++unsigned char stage_formation_scripts[40][STAGE_FORMATION_SCRIPT_SIZE];
++
+ void stage_data_load(void)
+ {
+ 	int count;
+diff --git a/th02_main.asm b/th02_main.asm
+index 090c78b4..eef1a540 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -1088,12 +1088,5 @@ public _stones_ring_tile_2
+ _stones_ring_tile_2	dw ?
+ public _stones_ring_tile_3
+ _stones_ring_tile_3	dw ?
+-public _map_length
+-_map_length	dw ?
+-		db    ?	;
+-public _stage_formation_script_count
+-_stage_formation_script_count	db ?
+-public _stage_formation_scripts
+-_stage_formation_scripts	db 2560 dup(?)
+ 
+ 		end

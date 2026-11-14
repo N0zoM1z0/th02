@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:23:17 +0100
+Subject: [PATCH] Define more of Marisa's uninitialized variables in C++
+
+---
+ th02/main/boss/marisa.cpp | 21 ++++++++++-----------
+ th02_main.asm             | 20 --------------------
+ 2 files changed, 10 insertions(+), 31 deletions(-)
+
+diff --git a/th02/main/boss/marisa.cpp b/th02/main/boss/marisa.cpp
+index d07e053f..46adfddb 100644
+--- a/th02/main/boss/marisa.cpp
++++ b/th02/main/boss/marisa.cpp
+@@ -38,13 +38,6 @@ void near dialog_pre(void);
+ 
+ // Marisa's four bits (orbs).
+ static const int BIT_COUNT = 4;
+-extern screen_x_t marisa_bit_left[PAGE_COUNT][BIT_COUNT];
+-extern screen_y_t marisa_bit_top[PAGE_COUNT][BIT_COUNT];
+-extern int16_t marisa_bit_hits[BIT_COUNT];
+-extern int16_t marisa_bit_state[BIT_COUNT];
+-extern int16_t marisa_bit_hit_this_frame[BIT_COUNT];
+-extern int16_t marisa_bit_radius[BIT_COUNT];
+-extern int16_t marisa_bit_speed[BIT_COUNT];
+ extern uint8_t byte_20671;
+ extern int16_t patnum_2064E;
+ extern uint8_t byte_2066E;
+@@ -62,7 +55,6 @@ void pascal near sub_FFF8(screen_x_t left, screen_y_t top, int frame);
+ 
+ extern int16_t shot_target_left;
+ extern int16_t shot_target_top;
+-extern int16_t marisa_phase;
+ extern uint8_t byte_1FFF8;
+ extern uint8_t byte_2066A;
+ extern bool byte_2066B;
+@@ -74,7 +66,6 @@ void sub_3EF4(void);
+ extern int16_t word_1FFF0;
+ extern int16_t word_1FFF2;
+ extern int16_t word_1FFF6;
+-extern int16_t word_26CFE;
+ 
+ void sub_13ABB(char far *fn);
+ void near dialog_post(void);
+@@ -105,6 +96,16 @@ int8_t byte_1EEA5 = 1;
+ // Uninitialized data, in the original order
+ // -----------------------------------------
+ 
++int16_t marisa_phase;
++int16_t word_26CFE;
++screen_y_t midboss4_bullet_top;
++screen_x_t marisa_bit_left[PAGE_COUNT][BIT_COUNT];
++screen_y_t marisa_bit_top[PAGE_COUNT][BIT_COUNT];
++int16_t marisa_bit_hits[BIT_COUNT];
++int16_t marisa_bit_state[BIT_COUNT];
++int16_t marisa_bit_hit_this_frame[BIT_COUNT];
++int16_t marisa_bit_radius[BIT_COUNT];
++int16_t marisa_bit_speed[BIT_COUNT];
+ int16_t marisa_bit_state_sum;
+ int8_t marisa_bg_col_p;
+ int8_t marisa_pattern;
+@@ -180,8 +181,6 @@ void sub_19E2F(void)
+ 
+ // Midboss
+ // -------
+-
+-extern screen_y_t midboss4_bullet_top;
+ extern int midboss_tile_row;
+ extern uint8_t pillar_frames_new;
+ 
+diff --git a/th02_main.asm b/th02_main.asm
+index b2ff82d6..08e6d032 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -1417,25 +1417,5 @@ _byte_26CF9	db ?
+ public _byte_26CFA
+ _byte_26CFA	db ?
+ 		db ?
+-public _marisa_phase
+-_marisa_phase	dw ?
+-public _word_26CFE
+-_word_26CFE	dw ?
+-public _midboss4_bullet_top
+-_midboss4_bullet_top	dw ?
+-public _marisa_bit_left, _marisa_bit_top, _marisa_bit_hits, _marisa_bit_state
+-public _marisa_bit_hit_this_frame
+-_marisa_bit_left	dw (2 * 4) dup(?)
+-_marisa_bit_top	dw (2 * 4) dup(?)
+-_marisa_bit_hits	dw 4 dup(?)
+-_marisa_bit_state	dw 4 dup(?)
+-_marisa_bit_hit_this_frame	dw 4 dup(?)
+-public _marisa_bit_radius, _marisa_bit_speed
+-_marisa_bit_radius	dw 4 dup(?)
+-_marisa_bit_speed label word
+-word_26D42	dw ?
+-word_26D44	dw ?
+-word_26D46	dw ?
+-word_26D48	dw ?
+ 
+ 		end

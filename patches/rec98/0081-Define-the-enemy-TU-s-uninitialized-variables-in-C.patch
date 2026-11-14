@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:25:14 +0100
+Subject: [PATCH] Define the enemy TU's uninitialized variables in C++
+
+---
+ th02/main/enemy/enemy.cpp | 20 +++++++++++++++++---
+ th02_main.asm             | 29 -----------------------------
+ 2 files changed, 17 insertions(+), 32 deletions(-)
+
+diff --git a/th02/main/enemy/enemy.cpp b/th02/main/enemy/enemy.cpp
+index e8aac8c9..96485f65 100644
+--- a/th02/main/enemy/enemy.cpp
++++ b/th02/main/enemy/enemy.cpp
+@@ -38,9 +38,24 @@ int pascal near shots_hittest(
+ void pascal items_add(screen_x_t left, screen_y_t top, int type);
+ 
+ static const int STAGE_LINE_COLUMNS = 49;
+-
+-extern int16_t far *stage_lines[STAGE_LINE_COLUMNS];
+ extern int stage_line_count;
++// Uninitialized data, in the original order
++enemy_t enemies[ENEMY_COUNT];
++stage_formation_t stage_formations[STAGE_FORMATION_COUNT];
++int16_t far *stage_lines[STAGE_LINE_COLUMNS];
++int stage_line_count;
++void (far *farfp_26C3C)(void);
++void (far *farfp_26C40)(void);
++unsigned char near *enemy_script;
++enemy_t near *enemy_cur;
++stage_formation_t near *enemy_formation;
++screen_x_t near *enemy_left_on_back_page;
++screen_y_t near *enemy_top_on_back_page;
++screen_x_t enemy_left;
++screen_y_t enemy_top;
++int8_t near *enemy_velocity_x;
++int8_t near *enemy_velocity_y;
++
+ int stage_line_cur = 0;
+ uint8_t enemy_count = 0;
+ extern uint8_t scroll_speed_this_frame;
+@@ -49,7 +64,6 @@ extern void (far *farfp_26C3C)(void);
+ extern void (far *farfp_26C40)(void);
+ 
+ // Script of the enemy currently being updated.
+-extern unsigned char near *enemy_script;
+ 
+ void enemies_nop(void)
+ {
+diff --git a/th02_main.asm b/th02_main.asm
+index 5ba75078..3431b68a 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -1275,34 +1275,5 @@ _sigma_phase_damage	dw ?
+ public _sigma_ring_angle
+ _sigma_ring_angle	db ?
+ 		db ?
+-public _enemies
+-_enemies	db (25 * 26h) dup(?)
+-public _stage_formations, _stage_lines
+-_stage_formations	db (128 * 24h) dup(?)
+-_stage_lines	dd 49 dup(?)
+-public _stage_line_count
+-_stage_line_count	dw ?
+-public _farfp_26C3C
+-_farfp_26C3C	dd ?
+-public _farfp_26C40
+-_farfp_26C40	dd ?
+-public _enemy_script
+-_enemy_script	dw ?
+-public _enemy_cur
+-_enemy_cur	dw ?
+-public _enemy_formation
+-_enemy_formation	dw ?
+-public _enemy_left_on_back_page
+-_enemy_left_on_back_page	dw ?
+-public _enemy_top_on_back_page
+-_enemy_top_on_back_page	dw ?
+-public _enemy_left
+-_enemy_left	dw ?
+-public _enemy_top
+-_enemy_top	dw ?
+-public _enemy_velocity_x
+-_enemy_velocity_x	dw ?
+-public _enemy_velocity_y
+-_enemy_velocity_y	dw ?
+ 
+ 		end

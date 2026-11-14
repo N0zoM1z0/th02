@@ -1,0 +1,160 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:29:36 +0100
+Subject: [PATCH] Define stage 3's uninitialized variables in C++
+
+---
+ th02/stage3.cpp | 39 ++++++++++++++++++++++---
+ th02_main.asm   | 77 +------------------------------------------------
+ 2 files changed, 36 insertions(+), 80 deletions(-)
+
+diff --git a/th02/stage3.cpp b/th02/stage3.cpp
+index 59f44928..8b8b5f45 100644
+--- a/th02/stage3.cpp
++++ b/th02/stage3.cpp
+@@ -38,10 +38,6 @@
+ #include "th02/main/item/item.hpp"
+ 
+ static const pixel_t STONE_W = 32;
+-
+-extern screen_x_t stone_left[STONE_COUNT];
+-extern screen_y_t stone_top[STONE_COUNT];
+-extern int stone_patnum[STONE_COUNT];
+ extern screen_x_t shot_target_left;
+ extern screen_y_t shot_target_top;
+ 
+@@ -49,5 +45,40 @@ int pascal near shots_hittest(
+ 	screen_x_t left, screen_y_t top, pixel_t w, pixel_t h
+ );
+ 
++// Uninitialized data, in the original order
++#pragma option -a2
++int stone_patnum[STONE_COUNT];
++uint8_t stones_phase;
++uint8_t stones_pattern;
++long stone_frames;
++screen_x_t* midboss3_left_on_back_page[STONE_COUNT];
++screen_y_t* midboss3_top_on_back_page[STONE_COUNT];
++screen_x_t stone_left[STONE_COUNT];
++screen_y_t stone_top[STONE_COUNT];
++screen_x_t stones_bullet_left;
++screen_y_t stones_bullet_top;
++vram_y_t stones_y_22D9C;
++pixel_t stage3_bg_radius;
++screen_x_t stage3_bg_center_x;
++screen_y_t stage3_bg_center_y;
++unsigned char stage3_bg_angle;
++screen_point_t stage3_bg_dots[PAGE_COUNT][64];
++unsigned char midboss3_angle[MIDBOSS3_COUNT];
++uint8_t midboss3_rounds;
++int stones_pattern_frame;
++screen_x_t stones_pillar_left;
++uint8_t stones_pillar_state;
++unsigned char angle_22FAF;
++unsigned char angle_22FB0;
++unsigned char angle_22FB1[STONE_COUNT];
++uint8_t stones_ring_tile_flag[TILES_X];
++uint8_t stones_ring_phase;
++uint8_t stones_ring_i;
++uint8_t stones_ring_done;
++int stones_ring_tile_1;
++int stones_ring_tile_2;
++int stones_ring_tile_3;
++#pragma option -a-
++
+ #include "th02/main/midboss/m3.cpp"
+ #include "th02/main/boss/b3.cpp"
+diff --git a/th02_main.asm b/th02_main.asm
+index eef1a540..16505fd9 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -35,6 +35,7 @@ include th02/sprites/main_pat.inc
+ 	extern _memcpy:proc
+ 
+ playperf_min = -6
++STONE_COUNT = 5
+ 
+ SP_STAGE = 0
+ SP_BOSS = 1
+@@ -1012,81 +1013,5 @@ public _shot_cooldown_1
+ _shot_cooldown_1	db ?
+ public _shot_cooldown_2
+ _shot_cooldown_2	db ?
+-public _stone_patnum
+-_stone_patnum	dw 5 dup(?)
+-public _stones_phase
+-_stones_phase	db ?
+-public _stones_pattern
+-_stones_pattern	db ?
+-public _stone_frames
+-_stone_frames	dd ?
+-
+-MIDBOSS3_COUNT = 2
+-
+-public _midboss3_left_on_back_page, _midboss3_top_on_back_page
+-_midboss3_left_on_back_page	dd STONE_COUNT dup (?)
+-_midboss3_top_on_back_page	dd STONE_COUNT dup (?)
+-
+-STONE_INNER_WEST = 0
+-STONE_INNER_EAST = 1
+-STONE_OUTER_WEST = 2
+-STONE_OUTER_EAST = 3
+-STONE_NORTH = 4
+-STONE_COUNT = 5
+-
+-STONE_W = 32
+-
+-public _stone_left, _stone_top
+-_stone_left	dw STONE_COUNT dup(?)
+-_stone_top 	dw STONE_COUNT dup(?)
+-
+-public _stones_bullet_left
+-_stones_bullet_left	dw ?
+-public _stones_bullet_top
+-_stones_bullet_top	dw ?
+-public _stones_y_22D9C
+-_stones_y_22D9C	dw ?
+-public _stage3_bg_radius
+-_stage3_bg_radius	dw ?
+-public _stage3_bg_center_x
+-_stage3_bg_center_x	dw ?
+-public _stage3_bg_center_y
+-_stage3_bg_center_y	dw ?
+-public _stage3_bg_angle
+-_stage3_bg_angle	db ?
+-		db ?
+-public _stage3_bg_dots
+-_stage3_bg_dots	dw (2 * 64 * 2) dup(?)
+-public _midboss3_angle, _midboss3_rounds
+-_midboss3_angle	db 2 dup(?)
+-_midboss3_rounds	db ?
+-		db ?
+-public _stones_pattern_frame
+-_stones_pattern_frame	dw ?
+-public _stones_pillar_left
+-_stones_pillar_left	dw ?
+-public _stones_pillar_state
+-_stones_pillar_state	db ?
+-public _angle_22FAF
+-_angle_22FAF	db ?
+-public _angle_22FB0
+-_angle_22FB0	db ?
+-public _angle_22FB1
+-_angle_22FB1 db 5 dup(?)
+-public _stones_ring_tile_flag
+-_stones_ring_tile_flag	db 24 dup(?)
+-public _stones_ring_phase
+-_stones_ring_phase	db ?
+-public _stones_ring_i
+-_stones_ring_i	db ?
+-public _stones_ring_done
+-_stones_ring_done	db ?
+-		db ?
+-public _stones_ring_tile_1
+-_stones_ring_tile_1	dw ?
+-public _stones_ring_tile_2
+-_stones_ring_tile_2	dw ?
+-public _stones_ring_tile_3
+-_stones_ring_tile_3	dw ?
+ 
+ 		end
