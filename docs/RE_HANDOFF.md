@@ -3,7 +3,7 @@
 ## State
 
 - OP.EXE, MAIN.EXE, MAINE.EXE and ZUN.COM are identical to the originals as
-  whole files, from a cold build of the patch series (`session5-cold6`).
+  whole files, from a cold build of the patch series (`session5-cold7`).
 - Work lives on branch `th02-recon` of the ReC98 worktree
   `.analysis/work/rec98` and is exported as `patches/rec98/*.patch`
   (`git format-patch b6ba5b0a52..th02-recon`). `scripts/build_th02.py`
@@ -22,11 +22,13 @@ All ZUN C code in MAIN is C++. What remains assembly:
   The final `damage` reload follows the 16-bit `add` into `score_delta`.
 - `pointnum_put()` and `shots_hittest()` are both preceded by a `00` pad,
   i.e. word-aligned modules, which TCC never emits.
-- master.lib code and data stay in assembly. ZUN data now defined in its C++
-  TUs (with string literals): `main_01a.cpp`, `main_05.cpp`, `player.cpp`,
-  stage 3, dialog, Rika, Meira, `regist_m.cpp`; `hittest.asm` owns its
-  tables. The rest is still in `th02_main.asm` (up to `spark_accel_x`) and
-  `th02/main_dtl.asm` (Sigma, enemies, Mima, Marisa).
+- master.lib code and data stay in assembly. ZUN data is defined in its C++
+  TUs (string literals included) for `main_01a.cpp`, `main_05.cpp`,
+  `player.cpp`, stage 3, dialog, Rika, Meira, `regist_m.cpp`, Sigma, the
+  enemies, Mima and Marisa; `hittest.asm` owns its tables. The rest is still
+  in `th02_main.asm`, ending at `spark_accel_x`. Its owner is unclear: the
+  bomb strings come before the bomb particle and spark sprites, so these may
+  be a separate TU (or ZUN's strings were arrays, not literals).
 
 ## Loop
 
@@ -166,8 +168,7 @@ boundaries, which the target's relocation table records:
   image, relocation order, `SS:SP` and allocation fields stay TLINK's.
 - Moving data into TUs works tail-first: the last ZUN block in
   `th02_main.asm`'s data belongs to the latest-linked TU still declaring it
-  `extern`, so no new modules are needed. `main_dtl.asm` can be taken apart
-  the same way from its own end.
+  `extern`, so no new modules are needed.
 - TCC's data order within a TU: variables in definition order (including
   the anonymous data of local aggregate initializers, at their function),
   then the literal pool in source order. `const` one-dimensional character
@@ -183,5 +184,5 @@ boundaries, which the target's relocation table records:
 ## Next useful actions
 
 1. `sub_3F8A()`, if a link setup that keeps the near call turns up.
-2. Move the remaining TU data and string literals out of `th02_main.asm`
-   into their TUs, using the data order as the guide.
+2. Continue moving data out of `th02_main.asm` from its end, starting with
+   the spark/bomb block (decide its owner first).

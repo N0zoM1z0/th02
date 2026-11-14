@@ -1,0 +1,385 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 23:55:17 +0100
+Subject: [PATCH] Define the data of Sigma's, the enemies', Mima's and Marisa's
+ TUs in C++
+
+th02/main_dtl.asm is empty now. Sigma's tables are local initializers;
+only the second one is word-aligned, so -a2 starts before its function
+(it would also pad the 7-byte tile image struct).
+---
+ Tupfile.lua               |  1 -
+ th02/main/boss/b5_.cpp    | 18 +++------
+ th02/main/boss/marisa.cpp | 30 +++++++--------
+ th02/main/boss/mima.cpp   |  3 +-
+ th02/main/boss/sigma.cpp  | 20 ++++------
+ th02/main/enemy/enemy.cpp |  3 +-
+ th02/main_dtl.asm         | 78 ---------------------------------------
+ 7 files changed, 33 insertions(+), 120 deletions(-)
+ delete mode 100644 th02/main_dtl.asm
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index 5cf8e7dc..81295214 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -571,7 +571,6 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/main/boss/rika.cpp",
+ 	"th02/main/boss/meira.cpp",
+ 	"th02/regist_m.cpp",
+-	"th02/main_dtl.asm",
+ 	"th02/main/boss/sigma.cpp",
+ 	"th02/main/enemy/enemy.cpp",
+ 	"th02/mima.cpp",
+diff --git a/th02/main/boss/b5_.cpp b/th02/main/boss/b5_.cpp
+index d2acb8b3..d505877d 100644
+--- a/th02/main/boss/b5_.cpp
++++ b/th02/main/boss/b5_.cpp
+@@ -37,15 +37,9 @@ extern uint8_t byte_26CC3;
+ extern uint8_t byte_26CC4;
+ extern uint8_t byte_26CC5;
+ extern int16_t mima_sphere_active[8];
+-extern char aMima_bft[];
+-extern char aMima1_bft[];
+-extern char aStage3_b_btt[];
+-extern char aMima_m[];
+-extern char aMaine_0[];
+ extern int16_t patnum_2064E;
+ extern uint8_t byte_2066A;
+ extern bool byte_2066B;
+-extern char aMima2_bft[];
+ 
+ void near dialog_pre(void);
+ void near dialog_post(void);
+@@ -81,15 +75,15 @@ void mima_init(void)
+ 	sub_1A6C5();
+ 	dialog_pre();
+ 	super_clean(128, 192);
+-	super_entry_bfnt(aMima_bft);
++	super_entry_bfnt("mima.bft");
+ 	dialog_script_stage5_pre_intro_animate();
+ 	vsync_Count1 = 0;
+ 	frame_delay(10);
+ 	sub_1A529();
+ 	super_clean(128, 192);
+ 	super_patnum = 128;
+-	super_entry_bfnt(aMima1_bft);
+-	super_entry_bfnt(aStage3_b_btt);
++	super_entry_bfnt("mima1.bft");
++	super_entry_bfnt("stage3_b.btt");
+ 	boss_left_on_page[0] = (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - 80);
+ 	boss_left_on_page[1] = boss_left_on_page[0];
+ 	boss_top_on_page[0] = (PLAYFIELD_TOP + 48);
+@@ -107,7 +101,7 @@ void mima_init(void)
+ 	snd_se_update();
+ 	sub_1A46B();
+ 	palette_white_in(3);
+-	sub_13ABB(aMima_m);
++	sub_13ABB("mima.m");
+ 	dialog_script_stage5_pre_winged_animate();
+ 	dialog_post();
+ 	shots_clear();
+@@ -156,7 +150,7 @@ void near mima_game_end(void)
+ 	resident->rem_lives = lives;
+ 	resident->rem_bombs = bombs;
+ 	skill_calculate();
+-	GameExecl(aMaine_0);
++	GameExecl("maine");
+ }
+ 
+ int near mima_19C8D(void)
+@@ -176,7 +170,7 @@ int near mima_19C8D(void)
+ 	}
+ 	super_clean(128, 192);
+ 	super_patnum = 128;
+-	super_entry_bfnt(aMima2_bft);
++	super_entry_bfnt("mima2.bft");
+ 	dialog_post();
+ 	graph_accesspage(page_front);
+ 	grcg_setcolor(GC_RMW, 0);
+diff --git a/th02/main/boss/marisa.cpp b/th02/main/boss/marisa.cpp
+index f2c4177f..b9d28d7b 100644
+--- a/th02/main/boss/marisa.cpp
++++ b/th02/main/boss/marisa.cpp
+@@ -54,7 +54,6 @@ extern uint8_t angle_26D88;
+ extern uint8_t byte_26D89;
+ extern int16_t word_26D8E;
+ extern int16_t word_26D90;
+-extern int8_t byte_1EEA5;
+ extern uint8_t byte_20671;
+ extern int16_t patnum_2064E;
+ extern uint8_t byte_2066E;
+@@ -62,13 +61,10 @@ extern uint8_t byte_2066F[];
+ extern uint8_t byte_26D7E;
+ extern uint8_t angle_26D7F;
+ extern uint8_t angle_26D80;
+-extern uint8_t byte_1EEA4;
+ extern int8_t byte_26D81;
+ extern screen_x_t word_26D82;
+ extern screen_y_t word_26D84;
+ extern uint8_t angle_26D86;
+-extern int16_t marisa_bit_flash_frames[BIT_COUNT];
+-extern int16_t marisa_defeat_frame;
+ extern uint8_t angle_1E510;
+ extern uint8_t byte_1EB88;
+ 
+@@ -89,9 +85,7 @@ extern int8_t marisa_pattern;
+ extern int8_t marisa_pattern_cycle;
+ extern uint8_t marisa_pattern_rounds;
+ extern uint8_t marisa_bit_patterns_seen;
+-extern uint8_t byte_1EE96;
+ extern uint8_t byte_1FFF8;
+-extern const uint8_t MARISA_BG_COLORS[6];
+ extern point_t marisa_topleft;
+ extern uint8_t byte_2066A;
+ extern bool byte_2066B;
+@@ -104,10 +98,6 @@ extern int16_t word_1FFF0;
+ extern int16_t word_1FFF2;
+ extern int16_t word_1FFF6;
+ extern int16_t word_26CFE;
+-extern char aMima_bft_0[];
+-extern char aStage3_b_bft[];
+-extern char aStage3_b_btt_0[];
+-extern char aBoss3_m[];
+ 
+ void sub_13ABB(char far *fn);
+ void near dialog_post(void);
+@@ -124,6 +114,17 @@ extern vram_offset_t scroll_line_vo;
+ 	player_and_options_put(); \
+ }
+ 
++// Data, in the original order
++// ---------------------------
++
++uint8_t MARISA_BG_COLORS[6] = { 10, 12, 13, 13, 12, 10 };
++uint8_t byte_1EE96 = 0;
++int midboss4_kill_frame = 0;
++int16_t marisa_defeat_frame = 0;
++int16_t marisa_bit_flash_frames[BIT_COUNT] = { 0 };
++uint8_t byte_1EEA4 = 2;
++int8_t byte_1EEA5 = 1;
++
+ // Background
+ // ----------
+ 
+@@ -174,7 +175,6 @@ void sub_19E2F(void)
+ // -------
+ 
+ extern bool16 midboss4_active;
+-extern int midboss4_kill_frame;
+ extern uint8_t midboss4_pattern;
+ extern uint8_t midboss4_patterns_done;
+ extern screen_y_t midboss4_bullet_top;
+@@ -567,7 +567,7 @@ void marisa_init(void)
+ 	dialog_pre();
+ 	super_clean(128, 192);
+ 	super_patnum = 128;
+-	super_entry_bfnt(aMima_bft_0);
++	super_entry_bfnt("mima.bft");
+ 	dialog_script_stage4_pre_intro_animate();
+ 	vsync_Count1 = 0;
+ 	frame_delay(10);
+@@ -575,8 +575,8 @@ void marisa_init(void)
+ 	dialog_script_generic_part_animate(DS_PREBOSS);
+ 	super_clean(128, 511);
+ 	super_patnum = 128;
+-	super_entry_bfnt(aStage3_b_bft);
+-	super_entry_bfnt(aStage3_b_btt_0);
++	super_entry_bfnt("stage3_b.bft");
++	super_entry_bfnt("stage3_b.btt");
+ 	boss_left_on_page[0] = (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - 48);
+ 	boss_left_on_page[1] = boss_left_on_page[0];
+ 	boss_top_on_page[0] = (PLAYFIELD_TOP + 48);
+@@ -594,7 +594,7 @@ void marisa_init(void)
+ 	snd_se_update();
+ 	sub_1A46B();
+ 	palette_white_in(1);
+-	sub_13ABB(aBoss3_m);
++	sub_13ABB("boss3.m");
+ 	dialog_script_stage4_pre_marisa_animate();
+ 	graph_clear();
+ 	marisa_and_player_put();
+diff --git a/th02/main/boss/mima.cpp b/th02/main/boss/mima.cpp
+index 4f175bd6..2c654355 100644
+--- a/th02/main/boss/mima.cpp
++++ b/th02/main/boss/mima.cpp
+@@ -89,7 +89,8 @@ extern point_t point_26CD6;
+ extern uint8_t byte_26CC3;
+ extern uint8_t byte_26CC6;
+ extern int16_t word_26CBC;
+-extern uint8_t angle_1EE54;
++uint8_t angle_1EE54 = 0;
++int16_t word_1EE56 = 0;
+ extern bool byte_2066A;
+ extern bool byte_2066B;
+ 
+diff --git a/th02/main/boss/sigma.cpp b/th02/main/boss/sigma.cpp
+index a5bdd17c..4829f237 100644
+--- a/th02/main/boss/sigma.cpp
++++ b/th02/main/boss/sigma.cpp
+@@ -114,11 +114,6 @@ struct sigma_pillar_offsets_t {
+ 	pixel_t v[5];
+ };
+ 
+-extern const sigma_pillar_offsets_t SIGMA_PILLAR_OFFSETS;
+-extern char aStage5b1_bft[];
+-extern char aStage5b2_bft[];
+-extern char aBoss5_m[];
+-extern char aMaine[];
+ // -----
+ 
+ // Midboss
+@@ -142,7 +137,6 @@ struct midbossx_tile_images_t {
+ };
+ 
+ extern midbossx_tile_t midbossx_tiles[MIDBOSSX_TILE_COUNT];
+-extern const midbossx_tile_images_t MIDBOSSX_TILE_IMAGES;
+ extern bool midbossx_active;
+ extern uint8_t midbossx_spread;
+ 
+@@ -179,7 +173,7 @@ void pascal near midbossx_tile_add(
+ 
+ void near midbossx_tiles_update(void)
+ {
+-	midbossx_tile_images_t images = MIDBOSSX_TILE_IMAGES;
++	midbossx_tile_images_t images = { 0, 1, 2, 0x10, 0x11, 0x12, 9 };
+ 	register midbossx_tile_t near *p = midbossx_tiles;
+ 	register int i;
+ 
+@@ -810,9 +804,11 @@ void near sigma_1619C(void)
+ 	}
+ }
+ 
++#pragma option -a2
++
+ void near sigma_162D3(void)
+ {
+-	sigma_pillar_offsets_t offsets = SIGMA_PILLAR_OFFSETS;
++	sigma_pillar_offsets_t offsets = { 60, 44, 76, 28, 92 };
+ 	unsigned char angle;
+ 	int i;
+ 
+@@ -1160,8 +1156,8 @@ void sigma_init(void)
+ 	dialog_pre();
+ 	super_clean(128, 192);
+ 	super_patnum = 128;
+-	super_entry_bfnt(aStage5b1_bft);
+-	super_entry_bfnt(aStage5b2_bft);
++	super_entry_bfnt("stage5b1.bft");
++	super_entry_bfnt("stage5b2.bft");
+ 	grc_setclip(PLAYFIELD_LEFT, 0, PLAYFIELD_RIGHT, (RES_Y - 1));
+ 	dialog_script_extra_pre_intro_animate();
+ 	boss_left_on_page[0] = (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - 64);
+@@ -1179,7 +1175,7 @@ void sigma_init(void)
+ 	shots_clear();
+ 	palette_white_out(1);
+ 	sigma_put();
+-	sub_13ABB(aBoss5_m);
++	sub_13ABB("boss5.m");
+ 	palette_white_in(1);
+ 	dialog_script_generic_part_animate(DS_PREBOSS);
+ 	dialog_post();
+@@ -1194,5 +1190,5 @@ void sigma_end(void)
+ 	resident->stage = 0x7F;
+ 	resident->score = ((score * 10) + resident->continues_used);
+ 	scoredat_extra_clear_save();
+-	GameExecl(aMaine);
++	GameExecl("maine");
+ }
+diff --git a/th02/main/enemy/enemy.cpp b/th02/main/enemy/enemy.cpp
+index 57744225..e8aac8c9 100644
+--- a/th02/main/enemy/enemy.cpp
++++ b/th02/main/enemy/enemy.cpp
+@@ -41,7 +41,8 @@ static const int STAGE_LINE_COLUMNS = 49;
+ 
+ extern int16_t far *stage_lines[STAGE_LINE_COLUMNS];
+ extern int stage_line_count;
+-extern int stage_line_cur;
++int stage_line_cur = 0;
++uint8_t enemy_count = 0;
+ extern uint8_t scroll_speed_this_frame;
+ extern int tile_rows_scrolled;
+ extern void (far *farfp_26C3C)(void);
+diff --git a/th02/main_dtl.asm b/th02/main_dtl.asm
+deleted file mode 100644
+index b892e027..00000000
+--- a/th02/main_dtl.asm
++++ /dev/null
+@@ -1,78 +0,0 @@
+-; ReC98
+-; -----
+-; The data of MAIN.EXE's TUs after the high score code (Sigma, the stage
+-; enemies, Mima and Marisa), split out of th02_main.asm so that it follows the
+-; data of th02/regist_m.cpp, as in the original link.
+-
+-_DATA	segment word public 'DATA' use16
+-public _MIDBOSSX_TILE_IMAGES
+-_MIDBOSSX_TILE_IMAGES	db 0, 1, 2, 10h, 11h, 12h, 9
+-		db 0
+-public _SIGMA_PILLAR_OFFSETS
+-_SIGMA_PILLAR_OFFSETS	dw 60, 44, 76, 28, 92
+-public _aStage5b1_bft
+-_aStage5b1_bft	db 'stage5b1.bft',0
+-public _aStage5b2_bft
+-_aStage5b2_bft	db 'stage5b2.bft',0
+-public _aBoss5_m
+-_aBoss5_m	db 'boss5.m',0
+-; char _aMaine[]
+-public _aMaine
+-_aMaine		db 'maine',0
+-public _stage_line_cur
+-_stage_line_cur	dw 0
+-public _enemy_count
+-_enemy_count	db 0
+-		db 0
+-public _angle_1EE54
+-_angle_1EE54	dw 0
+-public _word_1EE56
+-_word_1EE56	dw 0
+-public _aMima_bft
+-_aMima_bft	db 'mima.bft',0
+-public _aMima1_bft
+-_aMima1_bft	db 'mima1.bft',0
+-public _aStage3_b_btt
+-_aStage3_b_btt	db 'stage3_b.btt',0
+-public _aMima_m
+-_aMima_m		db 'mima.m',0
+-; char _aMaine_0[]
+-public _aMaine_0
+-_aMaine_0	db 'maine',0
+-public _aMima2_bft
+-_aMima2_bft	db 'mima2.bft',0
+-		db 0
+-public _MARISA_BG_COLORS
+-_MARISA_BG_COLORS	db  0Ah
+-		db  0Ch
+-		db  0Dh
+-		db  0Dh
+-		db  0Ch
+-		db  0Ah
+-public _byte_1EE96
+-_byte_1EE96	db 0
+-		db 0
+-public _midboss4_kill_frame
+-_midboss4_kill_frame	dw 0
+-public _marisa_defeat_frame
+-_marisa_defeat_frame	dw 0
+-public _marisa_bit_flash_frames
+-_marisa_bit_flash_frames	dw 4 dup(0)
+-public _byte_1EEA4
+-_byte_1EEA4	db 2
+-public _byte_1EEA5
+-_byte_1EEA5	db 1
+-public _aMima_bft_0
+-_aMima_bft_0	db 'mima.bft',0
+-public _aStage3_b_bft
+-_aStage3_b_bft	db 'stage3_b.bft',0
+-public _aStage3_b_btt_0
+-_aStage3_b_btt_0	db 'stage3_b.btt',0
+-public _aBoss3_m
+-_aBoss3_m	db 'boss3.m',0
+-		db 0
+-_DATA	ends
+-
+-DGROUP group _DATA
+-
+-	end
