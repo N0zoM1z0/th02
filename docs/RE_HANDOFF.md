@@ -23,8 +23,12 @@ Decompiled beyond ReC98 so far (all byte-exact):
   Keep the TU start at an odd address (now `0x1AB35`) or the `-a2`
   switch-table pad in `marisa_update()` moves; adding `marisa_1AA60` alone
   would make it even.
-- MAIN_04 circle helpers (`th02/main_04.cpp`), MAIN_06 score savers
-  (`regist_m.cpp`).
+- MAIN_04 circle helpers (`th02/main_04.cpp`), MAIN_05 stage data loader
+  (`th02/main_05.cpp`), MAIN_06 score savers (`regist_m.cpp`), and the player
+  controls at the end of `player.cpp` (needs `-zPmain_01` for its table).
+- MAINE: the last assembly functions (`extra_unlock_animate`,
+  `extra_clear_animate`, `main`) are now at the end of `end.cpp`; MAINE's game
+  code is entirely C++.
 
 ## Loop
 
@@ -49,6 +53,15 @@ disassembly; `th02_asmedit.py` removes/exports procedures and data labels.
   from the Mima code before it.
 - `-a2` word-aligns switch jump tables relative to the TU start (the `00`
   before a table). Without it, the table is unaligned.
+- A `nop / push cs / call near` does *not* prove a TU boundary: TCC emits a
+  plain far call for a function that is only declared so far, even in the
+  same TU, and TLINK shortens it. Only calls to functions already *defined*
+  earlier in the TU become `push cs / call near` without the `nop`
+  (`end.cpp` → `extra_unlock_animate()`). String-literal placement (TCC `-d`
+  merging, `aAll_pi = ($ - 7)`) is the better TU-membership evidence.
+- `resident_t::rank` and `::bgm_mode` are unsigned: comparisons against
+  nonzero constants are bytewise. MAIN_05's loader also compares `rank`
+  bytewise, unlike every other MAIN TU.
 - TLINK only turns a cross-TU far call into `nop / push cs / call near` when
   the target symbol has no group in its PUBDEF and its segment frame equals the
   caller's, which holds for MAIN_03_TEXT. ReC98 splits each original code
@@ -99,6 +112,4 @@ disassembly; `th02_asmedit.py` removes/exports procedures and data labels.
    `mima_end` (a separate TU after `skill_calculate()`), then midboss 4 and
    the rest of Marisa listed above.
 3. The rest of MAIN_01 (`_main`, `sub_B2AB`, `main_01c_TEXT` onward).
-4. MAIN_05 (`sub_1C3DF`, stage data loader) needs data labels for its raw
-   DGROUP addresses (`scripts/th02_datamap.py`).
 5. Whole-product identity: header size and relocation order.

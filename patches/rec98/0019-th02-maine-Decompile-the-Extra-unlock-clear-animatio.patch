@@ -1,0 +1,320 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 20:45:21 +0100
+Subject: [PATCH] [th02/maine] Decompile the Extra unlock/clear animations and
+ main(); resident rank and BGM mode are unsigned
+
+---
+ th02/end/end.cpp  |  80 ++++++++++++++++++++--
+ th02/resident.hpp |   4 +-
+ th02_maine.asm    | 166 ----------------------------------------------
+ 3 files changed, 77 insertions(+), 173 deletions(-)
+
+diff --git a/th02/end/end.cpp b/th02/end/end.cpp
+index 389dac34..7e70dca2 100644
+--- a/th02/end/end.cpp
++++ b/th02/end/end.cpp
+@@ -1,4 +1,6 @@
+ #include <stddef.h>
++#include <process.h>
++#include "th01/rank.h"
+ #include "planar.h"
+ #include "libs/master.lib/master.hpp"
+ #include "th01/hardware/egc.h"
+@@ -1101,7 +1103,7 @@ void near staffroll_and_verdict_animate(void)
+ 
+ 	// Copyright
+ 	graph_accesspage(1);
+-	verdict_label_put(8, VERDICT_LABEL_LEFT, VERDICT_COPYRIGHT "\0all.pi");
++	verdict_label_put(8, VERDICT_LABEL_LEFT, VERDICT_COPYRIGHT);
+ 	verdict_row_1_to_0_animate(
+ 		8, ((sizeof(VERDICT_COPYRIGHT) - 1) / sizeof(shiftjis_kanji_t))
+ 	);
+@@ -1109,11 +1111,79 @@ void near staffroll_and_verdict_animate(void)
+ 	key_delay();
+ 	palette_black_out(5);
+ 
+-	/* TODO: Replace with the decompiled call
+-	* 	extra_unlock_animate();
+-	* once that function is part of this translation unit */
+-	_asm { nop; push cs; call near ptr extra_unlock_animate; }
++	extra_unlock_animate();
+ 
+ 	graph_clear();
+ 	/// -------
+ }
++
++int scoredat_is_extra_unlocked(void);
++int cfg_load(void);
++int game_init_main(void);
++void game_exit(void);
++void regist_menu(void);
++
++void extra_unlock_animate(void)
++{
++	if(scoredat_is_extra_unlocked() && (resident->continues_used == 0)) {
++		pi_fullres_load_palette_apply_put_free(0, "all.pi");
++		palette_black_in(2);
++		frame_delay(150);
++		pi_fullres_load_palette_apply_put_free(0, "but.pi");
++		key_delay();
++		palette_black_out(5);
++	}
++}
++
++void extra_clear_animate(void)
++{
++	if(scoredat_is_extra_unlocked()) {
++		palette_settone(0);
++		pi_fullres_load_palette_apply_put_free(0, "all.pi");
++		palette_black_in(2);
++		frame_delay(150);
++		pi_fullres_load_palette_apply_put_free(0, "extra.pi");
++		key_delay();
++		palette_black_out(5);
++	}
++}
++
++int main(void)
++{
++	if(cfg_load() && (resident->stage == 0x7F)) {
++		game_init_main();
++		gaiji_backup();
++		gaiji_entry_bfnt("MIKOFT.bft");
++		snd_pmd_resident();
++		snd_mmd_resident();
++		if(resident->bgm_mode == SND_BGM_OFF) {
++			snd_midi_active = false;
++		} else if(resident->bgm_mode == SND_BGM_FM) {
++			snd_midi_active = false;
++			snd_determine_mode();
++		} else if(resident->bgm_mode == SND_BGM_MIDI) {
++			snd_midi_active = snd_midi_possible;
++			snd_determine_mode();
++		}
++		graph_accesspage(0);
++		graph_showpage(0);
++		super_entry_bfnt("endft.bft");
++		frame_delay(100);
++		if(resident->rank != RANK_EXTRA) {
++			if(resident->continues_used) {
++				end_bad_animate();
++			} else {
++				end_good_animate();
++			}
++			staffroll_and_verdict_animate();
++		} else {
++			extra_clear_animate();
++		}
++		palette_settone(50);
++		regist_menu();
++		palette_settone(0);
++		gaiji_restore();
++		game_exit();
++		execl("op", "op", NULL);
++	}
++}
+diff --git a/th02/resident.hpp b/th02/resident.hpp
+index 4c236986..f51a0780 100644
+--- a/th02/resident.hpp
++++ b/th02/resident.hpp
+@@ -13,9 +13,9 @@ struct resident_t {
+ 	unsigned int continues_used;
+ 	char rem_bombs;
+ 	char rem_lives;
+-	char rank;
++	uint8_t rank;
+ 	char start_power;
+-	char bgm_mode;
++	uint8_t bgm_mode;
+ 	uint8_t start_bombs;
+ 	uint8_t start_lives;
+ 	int8_t padding_2;
+diff --git a/th02_maine.asm b/th02_maine.asm
+index c028aaab..9c9dfe18 100644
+--- a/th02_maine.asm
++++ b/th02_maine.asm
+@@ -126,169 +126,10 @@ maine_01_TEXT	segment	byte public 'CODE' use16
+ 		;org 3
+ 		assume es:nothing, ss:nothing, ds:_DATA, fs:nothing, gs:nothing
+ 
+-; =============== S U B	R O U T	I N E =======================================
+ 
+-; Attributes: bp-based frame
+-public @extra_unlock_animate$qv
+-@extra_unlock_animate$qv proc far
+-		push	bp
+-		mov	bp, sp
+-		call	@scoredat_is_extra_unlocked$qv
+-		or	ax, ax
+-		jz	loc_B07D
+-		les	bx, _resident
+-		cmp	es:[bx+mikoconfig_t.continues_used], 0
+-		jnz	short loc_B07D
+-		call	@pi_load$qinxc c, 0, offset aAll_pi, ds
+-		call	@pi_palette_apply$qi stdcall, 0
+-		pop	cx
+-		call	@pi_put_8$qiii c, 0, large 0
+-		freePISlotLarge	0
+-		push	2
+-		call	palette_black_in
+-		call	@frame_delay$qi pascal, 150
+-		call	@pi_load$qinxc c, 0, offset aBut_pi, ds
+-		call	@pi_palette_apply$qi stdcall, 0
+-		pop	cx
+-		call	@pi_put_8$qiii c, 0, large 0
+-		freePISlotLarge	0
+-		call	@key_delay$qv
+-		push	5
+-		call	palette_black_out
+ 
+-loc_B07D:
+-		pop	bp
+-		retf
+-@extra_unlock_animate$qv endp
+ 
+ 
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sub_B07F	proc far
+-		push	bp
+-		mov	bp, sp
+-		call	@scoredat_is_extra_unlocked$qv
+-		or	ax, ax
+-		jz	loc_B115
+-		mov	PaletteTone, 0
+-		call	far ptr	palette_show
+-		call	@pi_load$qinxc c, 0, offset aAll_pi, ds
+-		call	@pi_palette_apply$qi stdcall, 0
+-		pop	cx
+-		call	@pi_put_8$qiii c, 0, large 0
+-		freePISlotLarge	0
+-		push	2
+-		call	palette_black_in
+-		call	@frame_delay$qi pascal, 150
+-		call	@pi_load$qinxc c, 0, offset aExtra_pi, ds
+-		call	@pi_palette_apply$qi stdcall, 0
+-		pop	cx
+-		call	@pi_put_8$qiii c, 0, large 0
+-		freePISlotLarge	0
+-		call	@key_delay$qv
+-		push	5
+-		call	palette_black_out
+-
+-loc_B115:
+-		pop	bp
+-		retf
+-sub_B07F	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-; int __cdecl main(int _argc, const char **_argv, const	char **_envp)
+-public _main
+-_main		proc far
+-
+-_argc		= word ptr  6
+-_argv		= dword	ptr  8
+-_envp		= dword	ptr  0Ch
+-
+-		push	bp
+-		mov	bp, sp
+-		call	@cfg_load$qv
+-		or	ax, ax
+-		jz	loc_B1FE
+-		les	bx, _resident
+-		cmp	es:[bx+mikoconfig_t.stage], 7Fh
+-		jnz	loc_B1FE
+-		call	@game_init_main$qv
+-		call	gaiji_backup
+-		push	ds
+-		push	offset aMikoft_bft ; "MIKOFT.bft"
+-		call	gaiji_entry_bfnt
+-		call	_snd_pmd_resident
+-		call	_snd_mmd_resident
+-		les	bx, _resident
+-		cmp	es:[bx+mikoconfig_t.bgm_mode], 0
+-		jnz	short loc_B161
+-		mov	_snd_midi_active, 0
+-		jmp	short loc_B189
+-; ---------------------------------------------------------------------------
+-
+-loc_B161:
+-		les	bx, _resident
+-		cmp	es:[bx+mikoconfig_t.bgm_mode], 1
+-		jnz	short loc_B173
+-		mov	_snd_midi_active, 0
+-		jmp	short loc_B184
+-; ---------------------------------------------------------------------------
+-
+-loc_B173:
+-		les	bx, _resident
+-		cmp	es:[bx+mikoconfig_t.bgm_mode], 2
+-		jnz	short loc_B189
+-		mov	al, _snd_midi_possible
+-		mov	_snd_midi_active, al
+-
+-loc_B184:
+-		call	_snd_determine_mode
+-
+-loc_B189:
+-		graph_accesspage 0
+-		mov	dx, 164	; Port 00A4h: Page display register
+-		out	dx, al
+-		call	super_entry_bfnt pascal, ds, offset aEndft_bft ; "endft.bft"
+-		call	@frame_delay$qi pascal, 100
+-		les	bx, _resident
+-		cmp	es:[bx+mikoconfig_t.rank], 4
+-		jz	short loc_B1C2
+-		cmp	es:[bx+mikoconfig_t.continues_used], 0
+-		jz	short loc_B1BA
+-		call	@end_bad_animate$qv
+-		jmp	short loc_B1BD
+-; ---------------------------------------------------------------------------
+-
+-loc_B1BA:
+-		call	@end_good_animate$qv
+-
+-loc_B1BD:
+-		call	@staffroll_and_verdict_animate$qv
+-		jmp	short loc_B1C6
+-; ---------------------------------------------------------------------------
+-
+-loc_B1C2:
+-		call	sub_B07F
+-
+-loc_B1C6:
+-		mov	PaletteTone, 50
+-		call	far ptr	palette_show
+-		call	@regist_menu$qv
+-		mov	PaletteTone, 0
+-		call	far ptr	palette_show
+-		call	gaiji_restore
+-		call	@game_exit$qv
+-		call	_execl c, offset path, ds, offset path, ds, large 0
+-
+-loc_B1FE:
+-		pop	bp
+-		retf
+-_main		endp
+ 
+ maine_01_TEXT	ends
+ 
+@@ -322,13 +163,6 @@ maine_04_TEXT	ends
+ 
+ 	.data
+ 
+-aAll_pi = ($ - 7)
+-aBut_pi		db 'but.pi',0
+-aExtra_pi	db 'extra.pi',0
+-aMikoft_bft	db 'MIKOFT.bft',0
+-aEndft_bft	db 'endft.bft',0
+-; char path[]
+-path		db 'op',0
+ include libs/master.lib/bfnt_id[data].asm
+ include libs/master.lib/clip[data].asm
+ include libs/master.lib/edges[data].asm

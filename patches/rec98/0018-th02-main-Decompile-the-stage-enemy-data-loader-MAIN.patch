@@ -1,0 +1,579 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 20:41:31 +0100
+Subject: [PATCH] [th02/main] Decompile the stage enemy data loader (MAIN_05)
+
+---
+ Tupfile.lua       |   1 +
+ th02/main_01a.cpp |   8 +-
+ th02/main_05.cpp  | 131 ++++++++++++++++++
+ th02_main.asm     | 329 +++-------------------------------------------
+ 4 files changed, 155 insertions(+), 314 deletions(-)
+ create mode 100644 th02/main_05.cpp
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index 638d7f02..7f97edc9 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -546,6 +546,7 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/snd_se.cpp",
+ 	"th02/main_03.cpp",
+ 	"th02/main_04.cpp",
++	"th02/main_05.cpp",
+ 	"th02/hud_ovrl.cpp",
+ 	"th02/bullet.cpp",
+ 	"th02/dialog.cpp",
+diff --git a/th02/main_01a.cpp b/th02/main_01a.cpp
+index ee541c5e..a27a0ac1 100644
+--- a/th02/main_01a.cpp
++++ b/th02/main_01a.cpp
+@@ -108,8 +108,8 @@ void sub_129DD(void);
+ void near sub_E271(void);
+ void sub_1028C(void);
+ void sub_CA1C(void);
+-void sub_1C608(void);
+-void sub_1C3DF(void);
++void stage_data_free(void);
++void stage_data_load(void);
+ void near sub_C5B0(void);
+ extern "C" void pascal near text_wipe(void);
+ 
+@@ -205,8 +205,8 @@ void near stage_init(void)
+ 	stage_fn_set_ext(fn, aMpn);
+ 	mpn_load(fn);
+ 	memcpy(&stage_palette, &mpn_palette, sizeof(Palette8));
+-	sub_1C608();
+-	sub_1C3DF();
++	stage_data_free();
++	stage_data_load();
+ 	dialog_load_and_init();
+ 	boss_bg_render = nullfunc_void;
+ 	boss_update = reinterpret_cast<intfunc_t>(nullfunc_false);
+diff --git a/th02/main_05.cpp b/th02/main_05.cpp
+new file mode 100644
+index 00000000..37b6fdd9
+--- /dev/null
++++ b/th02/main_05.cpp
+@@ -0,0 +1,131 @@
++/* ReC98
++ * -----
++ * Code segment #5 of TH02's MAIN.EXE: loading and freeing the stage enemy
++ * data (STAGE?.DT1)
++ */
++
++#include <mem.h>
++#include "platform.h"
++#include "pc98.h"
++#include "libs/master.lib/master.hpp"
++#include "libs/master.lib/pc98_gfx.hpp"
++#include "th01/rank.h"
++#include "th02/core/globals.hpp"
++#include "th02/formats/map.hpp"
++#include "th02/main/stage/stage.hpp"
++
++struct stage_formation_t {
++	int16_t unknown_00[4];
++	int16_t patnum;
++	int16_t unknown_0A[8];
++	int16_t speed;
++
++	// Not part of the file.
++	pixel_t w;
++	pixel_t h;
++	unsigned char far *script;
++};
++
++static const int STAGE_FORMATION_COUNT = 128;
++static const int STAGE_FORMATION_SCRIPT_SIZE = 64;
++static const int STAGE_LINE_COLUMNS = 49;
++
++extern stage_formation_t stage_formations[STAGE_FORMATION_COUNT];
++extern unsigned char stage_formation_scripts[][STAGE_FORMATION_SCRIPT_SIZE];
++extern uint8_t stage_formation_script_count;
++extern int16_t far *stage_lines[STAGE_LINE_COLUMNS];
++extern int stage_line_count;
++extern char stage_dt1_fn[];
++
++void stage_data_load(void)
++{
++	int count;
++	int j;
++	void __seg *seg;
++	int32_t size;
++	char far *fn;
++	stage_formation_t near *dest;
++	unsigned char far *src;
++	int i;
++
++	fn = stage_dt1_fn;
++	fn[5] = ('0' + stage_id);
++	file_ropen(fn);
++	file_read(&size, 4);
++	seg = hmem_allocbyte(size);
++	src = reinterpret_cast<unsigned char far *>(seg);
++	file_read(src, size);
++	file_close();
++
++	map_length = *reinterpret_cast<int16_t far *>(src);
++	src += 2;
++	for(i = 0; i < map_length; i++) {
++		map[i] = *src;
++		src++;
++	}
++
++	count = *reinterpret_cast<int16_t far *>(src);
++	src += 2;
++	stage_formation_script_count = 0;
++	for(dest = stage_formations, i = 0; i < count; i++, dest++) {
++		memcpy(dest, src, 0x1C);
++		src += 0x1C;
++		dest->w = ((super_patsize[stage_formations[i].patnum] >> 8) << 3);
++		dest->h = (super_patsize[stage_formations[i].patnum] & 0xFF);
++		j = dest->speed;
++		if(rank == RANK_EASY) {
++			j <<= 1;
++		// Unsigned in this translation unit: compared bytewise, unlike all
++		// other rank checks in MAIN.EXE.
++		} else if((static_cast<uint8_t>(rank) == RANK_HARD) || (static_cast<uint8_t>(rank) == RANK_LUNATIC)) {
++			j >>= 1;
++		}
++		dest->speed = j;
++		if(*src == 0xFE) {
++			src++;
++			dest->script = stage_formation_scripts[*src];
++			src++;
++			src++;
++		} else {
++			j = 0;
++			do {
++				stage_formation_scripts[stage_formation_script_count][j] = *src;
++				src++;
++				j++;
++			} while(*src != 0xFF);
++			src++;
++			dest->script = stage_formation_scripts[stage_formation_script_count];
++			stage_formation_script_count++;
++		}
++	}
++
++	count = *reinterpret_cast<int16_t far *>(src);
++	src += 2;
++	stage_line_count = count;
++	for(i = 0; i < STAGE_LINE_COLUMNS; i++) {
++		stage_lines[i] = reinterpret_cast<int16_t far *>(
++			hmem_allocbyte(count * sizeof(int16_t))
++		);
++	}
++	for(i = 0; i < count; i++) {
++		stage_lines[0][i] = *reinterpret_cast<int16_t far *>(src);
++		src += 2;
++		for(j = 1; j < STAGE_LINE_COLUMNS; j++) {
++			stage_lines[j][i] = (*src == 0xFF) ? -1 : *src;
++			src++;
++		}
++	}
++	hmem_free(seg);
++}
++
++void stage_data_free(void)
++{
++	register int i;
++
++	for(i = 0; i < STAGE_LINE_COLUMNS; i++) {
++		if(stage_lines[i] != NULL) {
++			hmem_free(reinterpret_cast<void __seg *>(FP_SEG(stage_lines[i])));
++			stage_lines[i] = NULL;
++		}
++	}
++}
+diff --git a/th02_main.asm b/th02_main.asm
+index fbde077f..ff556338 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -1469,7 +1469,7 @@ public @GameExecl$qnxc
+ 		freePISlotLarge	0
+ 		call	sub_E24A
+ 		call	_mpn_free
+-		call	@sub_1C608$qv
++		call	@stage_data_free$qv
+ 		call	super_free
+ 		call	graph_clear
+ 		call	text_clear
+@@ -15215,10 +15215,10 @@ var_2		= word ptr -2
+ 		push	si
+ 		push	di
+ 		mov	ax, word_1EE50
+-		cmp	ax, word_26C3A
++		cmp	ax, _stage_line_count
+ 		jge	loc_16E39
+ 		add	ax, ax
+-		les	bx, dword_26B76
++		les	bx, _stage_lines
+ 		add	bx, ax
+ 		mov	ax, es:[bx]
+ 		cmp	ax, _tile_rows_scrolled
+@@ -15230,7 +15230,7 @@ var_2		= word ptr -2
+ loc_16DC4:
+ 		mov	bx, di
+ 		shl	bx, 2
+-		les	bx, [bx-6EFAh]
++		les	bx, _stage_lines[bx]
+ 		mov	ax, word_1EE50
+ 		add	ax, ax
+ 		add	bx, ax
+@@ -15238,7 +15238,7 @@ loc_16DC4:
+ 		jz	short loc_16E2F
+ 		mov	bx, di
+ 		shl	bx, 2
+-		mov	bx, [bx-6EFAh]
++		mov	bx, word ptr _stage_lines[bx]
+ 		mov	ax, word_1EE50
+ 		add	ax, ax
+ 		add	bx, ax
+@@ -18447,304 +18447,8 @@ main_04_TEXT	ends
+ 
+ ; Segment type:	Pure code
+ main_05_TEXT	segment	byte public 'CODE' use16
+-		assume cs:main_05_TEXT
+-		;org 0Fh
+-		assume es:nothing, ss:nothing, ds:_DATA, fs:nothing, gs:nothing
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @sub_1C3DF$qv
+-@sub_1C3DF$qv	proc far
+-
+-src		= dword	ptr -14h
+-dest		= dword	ptr -10h
+-var_A		= word ptr -0Ah
+-var_6		= word ptr -6
+-var_4		= word ptr -4
+-var_2		= word ptr -2
+-
+-		enter	14h, 0
+-		push	si
+-		push	di
+-		mov	word ptr [bp-0Ch], ds
+-		mov	word ptr [bp+dest+2], 111Ah
+-		les	bx, [bp+dest+2]
+-		mov	al, _stage_id
+-		add	al, '0'
+-		mov	es:[bx+5], al
+-		push	word ptr [bp-0Ch]
+-		push	bx
+-		call	file_ropen
+-		push	ss
+-		lea	ax, [bp+var_A]
+-		push	ax
+-		push	4
+-		call	file_read
+-		push	[bp+var_A]
+-		call	hmem_allocbyte
+-		mov	[bp+var_6], ax
+-		mov	word ptr [bp+src+2], ax
+-		mov	word ptr [bp+src], 0
+-		push	ax
+-		push	word ptr [bp+src]
+-		push	[bp+var_A]
+-		call	file_read
+-		call	file_close
+-		les	bx, [bp+src]
+-		mov	ax, es:[bx]
+-		mov	_map_length, ax
+-		add	word ptr [bp+src], 2
+-		xor	di, di
+-		jmp	short loc_1C451
+-; ---------------------------------------------------------------------------
+-
+-loc_1C443:
+-		les	bx, [bp+src]
+-		mov	al, es:[bx]
+-		mov	_map[di], al
+-		inc	word ptr [bp+src]
+-		inc	di
+-
+-loc_1C451:
+-		cmp	di, _map_length
+-		jl	short loc_1C443
+-		les	bx, [bp+src]
+-		mov	ax, es:[bx]
+-		mov	[bp+var_2], ax
+-		add	word ptr [bp+src], 2
+-		mov	byte_22FDB, 0
+-		mov	word ptr [bp+dest], 7F06h
+-		xor	di, di
+-		jmp	loc_1C55E
+-; ---------------------------------------------------------------------------
+-
+-loc_1C473:
+-		push	1Ch		; n
+-		pushd	[bp+src]	; src
+-		push	ds
+-		push	word ptr [bp+dest] ; dest
+-		call	_memcpy
+-		add	sp, 0Ah
+-		add	word ptr [bp+src], 1Ch
+-		mov	bx, di
+-		imul	bx, 24h
+-		mov	bx, [bx+7F0Eh]
+-		add	bx, bx
+-		mov	ax, [bx+1EDAh]
+-		shr	ax, 8
+-		shl	ax, 3
+-		mov	bx, word ptr [bp+dest]
+-		mov	[bx+1Ch], ax
+-		mov	bx, di
+-		imul	bx, 24h
+-		mov	bx, [bx+7F0Eh]
+-		add	bx, bx
+-		mov	ax, [bx+1EDAh]
+-		and	ax, 255
+-		mov	bx, word ptr [bp+dest]
+-		mov	[bx+1Eh], ax
+-		mov	ax, [bx+1Ah]
+-		mov	[bp+var_4], ax
+-		cmp	_rank, RANK_EASY
+-		jnz	short loc_1C4CE
+-		shl	[bp+var_4], 1
+-		jmp	short loc_1C4DF
+-; ---------------------------------------------------------------------------
+-
+-loc_1C4CE:
+-		cmp	_rank, RANK_HARD
+-		jz	short loc_1C4DC
+-		cmp	_rank, RANK_LUNATIC
+-		jnz	short loc_1C4DF
+-
+-loc_1C4DC:
+-		sar	[bp+var_4], 1
+-
+-loc_1C4DF:
+-		mov	bx, word ptr [bp+dest]
+-		mov	ax, [bp+var_4]
+-		mov	[bx+1Ah], ax
+-		les	bx, [bp+src]
+-		cmp	byte ptr es:[bx], 0FEh
+-		jnz	short loc_1C513
+-		inc	word ptr [bp+src]
+-		les	bx, [bp+src]
+-		mov	al, es:[bx]
+-		mov	ah, 0
+-		shl	ax, 6
+-		add	ax, 556Ch
+-		mov	bx, word ptr [bp+dest]
+-		mov	word ptr [bx+22h], ds
+-		mov	[bx+20h], ax
+-		inc	word ptr [bp+src]
+-		inc	word ptr [bp+src]
+-		jmp	short loc_1C559
+-; ---------------------------------------------------------------------------
+-
+-loc_1C513:
+-		mov	[bp+var_4], 0
+-
+-loc_1C518:
+-		mov	al, byte_22FDB
+-		mov	ah, 0
+-		shl	ax, 6
+-		add	ax, [bp+var_4]
+-		les	bx, [bp+src]
+-		mov	dl, es:[bx]
+-		mov	bx, ax
+-		mov	[bx+556Ch], dl
+-		inc	word ptr [bp+src]
+-		inc	[bp+var_4]
+-		les	bx, [bp+src]
+-		cmp	byte ptr es:[bx], -1
+-		jnz	short loc_1C518
+-		inc	word ptr [bp+src]
+-		mov	al, byte_22FDB
+-		mov	ah, 0
+-		shl	ax, 6
+-		add	ax, 556Ch
+-		mov	bx, word ptr [bp+dest]
+-		mov	word ptr [bx+22h], ds
+-		mov	[bx+20h], ax
+-		inc	byte_22FDB
+-
+-loc_1C559:
+-		inc	di
+-		add	word ptr [bp+dest], 24h	; '$'
+-
+-loc_1C55E:
+-		cmp	di, [bp+var_2]
+-		jl	loc_1C473
+-		les	bx, [bp+src]
+-		mov	ax, es:[bx]
+-		mov	[bp+var_2], ax
+-		add	word ptr [bp+src], 2
+-		mov	word_26C3A, ax
+-		xor	di, di
+-		jmp	short loc_1C594
+-; ---------------------------------------------------------------------------
+-
+-loc_1C579:
+-		mov	ax, [bp+var_2]
+-		add	ax, ax
+-		push	ax
+-		call	hmem_allocbyte
+-		mov	bx, di
+-		shl	bx, 2
+-		mov	[bx-6EF8h], ax
+-		mov	word ptr [bx-6EFAh], 0
+-		inc	di
+-
+-loc_1C594:
+-		cmp	di, 31h	; '1'
+-		jl	short loc_1C579
+-		xor	di, di
+-		jmp	short loc_1C5F7
+-; ---------------------------------------------------------------------------
+-
+-loc_1C59D:
+-		mov	ax, di
+-		add	ax, ax
+-		les	bx, dword_26B76
+-		add	bx, ax
+-		push	es
+-		les	si, [bp+src]
+-		mov	ax, es:[si]
+-		pop	es
+-		mov	es:[bx], ax
+-		add	word ptr [bp+src], 2
+-		mov	[bp+var_4], 1
+-		jmp	short loc_1C5F0
+-; ---------------------------------------------------------------------------
+-
+-loc_1C5BD:
+-		mov	bx, [bp+var_4]
+-		shl	bx, 2
+-		les	bx, [bx-6EFAh]
+-		mov	ax, di
+-		add	ax, ax
+-		add	bx, ax
+-		push	es
+-		push	bx
+-		les	bx, [bp+src]
+-		cmp	byte ptr es:[bx], -1
+-		jnz	short loc_1C5DD
+-		mov	ax, 0FFFFh
+-		jmp	short loc_1C5E5
+-; ---------------------------------------------------------------------------
+-
+-loc_1C5DD:
+-		les	bx, [bp+src]
+-		mov	al, es:[bx]
+-		mov	ah, 0
+-
+-loc_1C5E5:
+-		pop	bx
+-		pop	es
+-		mov	es:[bx], ax
+-		inc	word ptr [bp+src]
+-		inc	[bp+var_4]
+-
+-loc_1C5F0:
+-		cmp	[bp+var_4], 31h	; '1'
+-		jl	short loc_1C5BD
+-		inc	di
+-
+-loc_1C5F7:
+-		cmp	di, [bp+var_2]
+-		jl	short loc_1C59D
+-		push	[bp+var_6]
+-		call	hmem_free
+-		pop	di
+-		pop	si
+-		leave
+-		retf
+-@sub_1C3DF$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @sub_1C608$qv
+-@sub_1C608$qv	proc far
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		xor	si, si
+-		jmp	short loc_1C63F
+-; ---------------------------------------------------------------------------
+-
+-loc_1C610:
+-		mov	bx, si
+-		shl	bx, 2
+-		mov	ax, [bx-6EFAh]
+-		or	ax, [bx-6EF8h]
+-		jz	short loc_1C63E
+-		mov	bx, si
+-		shl	bx, 2
+-		push	word ptr [bx-6EF8h]
+-		call	hmem_free
+-		mov	bx, si
+-		shl	bx, 2
+-		mov	word ptr [bx-6EF8h], 0
+-		mov	word ptr [bx-6EFAh], 0
+-
+-loc_1C63E:
+-		inc	si
+-
+-loc_1C63F:
+-		cmp	si, 31h	; '1'
+-		jl	short loc_1C610
+-		pop	si
+-		pop	bp
+-
+-locret_1C646:
+-		retf
+-@sub_1C608$qv	endp
+-
++	extern @stage_data_load$qv:proc
++	extern @stage_data_free$qv:proc
+ main_05_TEXT	ends
+ 
+ REGIST_M_TEXT segment	byte public 'CODE' use16
+@@ -19283,7 +18987,8 @@ aBoss2_m	db 'boss2.m',0
+ public _byte_1EB88
+ _byte_1EB88	db 1
+ 		db 0
+-aStage_dt1	db 'STAGE .DT1',0
++public _stage_dt1_fn
++_stage_dt1_fn	db 'STAGE .DT1',0
+ 		db 0
+ public _LINE_BLANK, _clear_bytes
+ _LINE_BLANK 	dw aLINE_BLANK
+@@ -20110,8 +19815,10 @@ tile_image_22FD6	dw ?
+ public _map_length
+ _map_length	dw ?
+ 		db    ?	;
+-byte_22FDB	db ?
+-		db 2704 dup(?)
++public _stage_formation_script_count
++_stage_formation_script_count	db ?
++public _stage_formation_scripts
++_stage_formation_scripts	db 2704 dup(?)
+ point_23A6C	Point <?>
+ byte_23A70	db ?
+ 		db ?
+@@ -20226,10 +19933,12 @@ fp_255B8	dw ?
+ fp_255BA	dw ?
+ word_255BC	dw ?
+ byte_255BE	db ?
+-		db 5559 dup(?)
+-dword_26B76	dd ?
+-		db 192 dup(?)
+-word_26C3A	dw ?
++		db 951 dup(?)
++public _stage_formations, _stage_lines
++_stage_formations	db (128 * 24h) dup(?)
++_stage_lines	dd 49 dup(?)
++public _stage_line_count
++_stage_line_count	dw ?
+ public _farfp_26C3C
+ _farfp_26C3C	dd ?
+ public _farfp_26C40
