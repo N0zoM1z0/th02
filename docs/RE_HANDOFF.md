@@ -16,10 +16,13 @@ All ZUN C code in MAIN is C++. What remains assembly:
 - `pointnum_put()` (`th02/main/pointnum/num_put_m.asm`) and `pfopen()`
   (`th02/main/pf.asm`): hand-written by ZUN, like their TH04/TH05 siblings.
 - `sub_3F8A()` (`th02/main/dots_upd.asm`): its call to `vector2()` in SHARED
-  is `push cs / call near` in the original, which TLINK 6.10 only produces
-  within one physical segment. A natural far call gives an extra relocation.
-- `shots_hittest()` (`th02/main/hittest.asm`): the C++ version differs only
-  in the final reload of `damage`.
+  is `push cs / call near` with a near fixup (now written symbolically).
+  TLINK 6.10 never shortens a far call across physical segments, so a
+  natural C++ call gives a far CALL and an extra relocation.
+- `shots_hittest()` (`th02/main/hittest.asm`): ZUN's own assembly module. The
+  target lists its relocations in ascending (TASM) order, and its code
+  segment is word-aligned (a `00` pad after stage 3), which TCC never emits.
+  The final `damage` reload follows the 16-bit `add` into `score_delta`.
 - master.lib code, and the data of TUs that still declare it `extern`, stay
   in `th02_main.asm` / `th02/main_dtl.asm`. `main_01a.cpp` and
   `regist_m.cpp` define their own data; string literals are still extern.
@@ -67,11 +70,11 @@ disassembly; `th02_asmedit.py` removes/exports procedures and data labels.
   it after the new C++ object; segment contributions follow object order.
   Such a module must not use `.model` (it adds an empty `<FILE>_TEXT`
   segment that shifts DGROUP).
-- `shots_hittest()` was compiled with `-2` (inverted short jumps over near
-  JMPs). Its C++ version (`/tmp` copy not kept; rebuild from the asm) matches
-  with `_BL = shot_level; _BH = 0; _BX += _BX;` table reads, `_BX = y_offset`
-  coordinate reads, `-= 0x80u`, and a do-while; only the final reload of
-  `damage` before `return` was not reproduced.
+- `shots_hittest()`'s body is TCC `-2` output (inverted short jumps over near
+  JMPs; `_BL = shot_level; _BH = 0; _BX += _BX;` table reads, `_BX = y_offset`
+  coordinate reads, `-= 0x80u`, a do-while), but the module is ZUN's
+  assembly (see "State"). An inline `asm` statement in TCC code also makes
+  TCC reload registers afterwards, which is how the `damage` reload arises.
 - Two adjacent constant arguments are pushed as one `push imm32` only when both
   parameters are `int`. `bullets_add_16x16()` therefore takes `int patnum`.
 - Register variables: TCC's automatic choice depends on use. A result that is
@@ -166,8 +169,7 @@ boundaries, which the target's relocation table records:
 
 ## Next useful actions
 
-1. `shots_hittest()`'s final reload; `sub_3F8A()` if a TLINK setup that
-   shortens across segments turns up.
+1. `sub_3F8A()`, if a link setup that keeps the near call turns up.
 2. Move the remaining TU data and string literals out of `th02_main.asm`
    into their TUs, using the data order as the guide.
 3. Identify the tool that rewrote MAINE.EXE's header.

@@ -6,7 +6,7 @@ The only input is config/rec98_th02_units.csv (written by build_th02.py
 
 * source  - C/C++ contributions (ReC98 or src/) byte-equal to the target
 * differs - C/C++ contributions with differing bytes
-* asm     - ReC98 assembly in game segments: the open frontier
+* asm     - assembly modules in game segments (ZUN's own assembly in MAIN)
 * library - Borland runtime, c0 and the asm files' _TEXT (master.lib etc.)
 """
 
@@ -22,7 +22,7 @@ COLORS = {"source": "#55c7a6", "differs": "#f7768e", "asm": "#e0af68", "library"
 LABELS = {
     "source": "C/C++ byte-equal",
     "differs": "C/C++ differing",
-    "asm": "ASM game code (open)",
+    "asm": "ZUN assembly modules",
     "library": "runtime + asm _TEXT (mostly master.lib)",
 }
 
@@ -107,8 +107,11 @@ def markdown(data: dict[str, dict[str, int]], zun: bool) -> str:
         "Bytes are CODE-class linker-map contributions compared with the original",
         "Japanese executables. Library covers the Borland runtime, c0 and the",
         "assembly files' `_TEXT`: master.lib plus ZUN's hand-written `pfopen()`.",
-        "ASM game code is the rest of ZUN's code that is still assembly (in MAIN:",
-        "`shots_hittest()`, `pointnum_put()` and `sub_3F8A()`).",
+        "ASM game code is MAIN's `shots_hittest()` and `pointnum_put()`. ZUN wrote",
+        "both as assembly modules (TASM fixup order, a word-aligned code segment,",
+        "`enter 0, 0`), so they stay assembly. The only other ZUN code in assembly",
+        "is `sub_3F8A()` in MAIN's `_TEXT`: its near call into SHARED cannot come",
+        "from a far call under TLINK 6.10.",
         "",
         "| Product | C/C++ byte-equal | C/C++ differing | ASM game code | Library | Game segments in C/C++ |",
         "| --- | ---: | ---: | ---: | ---: | ---: |",
