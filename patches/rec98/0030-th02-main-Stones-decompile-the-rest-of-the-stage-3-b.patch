@@ -1,0 +1,1557 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 21:54:35 +0100
+Subject: [PATCH] [th02/main] Stones: decompile the rest of the stage 3 boss
+
+pillar_add() takes an int patnum: its callers push the duration and patnum
+constants as one PUSH imm32. The [5] stone kill frame array ends in the word
+ReC98 called word_1EB26.
+---
+ th02/main/boss/boss.hpp   |   2 +
+ th02/main/boss/stones.cpp | 422 ++++++++++++++++-
+ th02/main/pillar.cpp      |   2 +-
+ th02_main.asm             | 964 +-------------------------------------
+ 4 files changed, 435 insertions(+), 955 deletions(-)
+
+diff --git a/th02/main/boss/boss.hpp b/th02/main/boss/boss.hpp
+index 9671c7ae..9c5ec89c 100644
+--- a/th02/main/boss/boss.hpp
++++ b/th02/main/boss/boss.hpp
+@@ -16,3 +16,5 @@ extern screen_y_t near* boss_top_on_back_page;
+ // dealt, instead of using a decreasing HP value.
+ extern int boss_damage;
+ // ----------------------
++
++static const unsigned char BOSS_DEFEAT_INVINCIBILITY_FRAMES = 200;
+diff --git a/th02/main/boss/stones.cpp b/th02/main/boss/stones.cpp
+index 66f14341..2b5d99e5 100644
+--- a/th02/main/boss/stones.cpp
++++ b/th02/main/boss/stones.cpp
+@@ -28,6 +28,12 @@
+ #include "th02/main/player/player.hpp"
+ #include "th02/main/tile/tile.hpp"
+ #include "th01/rank.h"
++#include "th02/v_colors.hpp"
++#include "th02/main/score.hpp"
++#include "th02/main/spark.hpp"
++#include "th02/main/item/item.hpp"
++
++static const pixel_t STONE_W = 32;
+ 
+ extern screen_x_t stone_left[STONE_COUNT];
+ extern screen_y_t stone_top[STONE_COUNT];
+@@ -50,17 +56,6 @@ extern const char aBoss2_m[];
+ void near dialog_pre(void);
+ void near dialog_post(void);
+ 
+-void near stones_116EC(void);
+-int pascal near stones_11766(int stone);
+-void near stones_11877(void);
+-void near stones_11997(void);
+-void near stones_119CD(void);
+-void pascal near stones_11A87(int stones_removed);
+-void near stones_11B5D(void);
+-void near stones_11BFE(void);
+-void near stones_11C37(void);
+-void near stones_11C8A(void);
+-void near stones_11D30(void);
+ void sub_129FC(void);
+ void sub_13ABB(char far *fn);
+ void sub_17A55(void);
+@@ -82,8 +77,411 @@ extern const uint8_t STONES_RING_ORDER_LEFT[TILES_X / 2];
+ extern const uint8_t STONES_RING_ORDER_RIGHT[TILES_X / 2];
+ 
+ void pascal near pillar_add(
+-	screen_x_t left, screen_y_t top, int duration, uint8_t patnum
++	screen_x_t left, screen_y_t top, int duration, int patnum
++);
++
++extern int stone_kill_frame[STONE_COUNT];
++extern uint8_t byte_2066E;
++extern unsigned char angle_1EB28;
++extern screen_x_t stones_pillar_left;
++extern uint8_t stones_pillar_state;
++extern unsigned char player_invincibility_time;
++
++int pascal near shots_hittest(
++	screen_x_t left, screen_y_t top, pixel_t w, pixel_t h
+ );
++void pascal near sub_FFF8(screen_x_t center_x, screen_y_t center_y, int frame);
++void pascal items_add(screen_x_t left, screen_y_t top, int type);
++
++void stones_bg_render(void)
++{
++	register int i;
++
++	for(i = 0; i < STONE_COUNT; i++) {
++		if(stone_flag[i] < SF_REMOVED) {
++			tiles_invalidate_rect(stone_left[i], stone_top[i], STONE_W, STONE_W);
++			if(stone_flag[i] == SF_REMOVE) {
++				stone_flag[i] = SF_REMOVED;
++			}
++		}
++	}
++}
++
++void near stones_116EC(void)
++{
++	register int i;
++	register vram_y_t vram_top;
++
++	for(i = 0; i < STONE_COUNT; i++) {
++		if(stone_flag[i] < SF_KILL_ANIM) {
++			vram_top = stone_top[i];
++			vram_top += scroll_line;
++			if(vram_top >= RES_Y) {
++				vram_top -= RES_Y;
++			}
++			if(stone_unknown[i]) {
++				snd_se_play(4);
++				super_roll_put_1plane(
++					stone_left[i],
++					vram_top,
++					stone_patnum[i],
++					0,
++					super_plane(V_WHITE)
++				);
++				stone_unknown[i] = 0;
++			} else {
++				super_roll_put(stone_left[i], vram_top, stone_patnum[i]);
++			}
++		}
++	}
++}
++
++int pascal near stones_11766(int stone)
++{
++	int patnum;
++	int frames;
++	vram_y_t vram_top;
++
++	frames = 64;
++	sparks_add(
++		(stone_left[stone] + 16), (stone_top[stone] + 12), (5 << 4), 2, false
++	);
++	patnum = 10;
++	vram_top = stone_top[stone];
++	vram_top += scroll_line;
++	if(vram_top >= RES_Y) {
++		vram_top -= RES_Y;
++	}
++	if(stone == STONE_NORTH) {
++		frames += 32;
++		sub_FFF8(
++			(stone_left[STONE_NORTH] + 8),
++			(stone_top[STONE_NORTH] + 8),
++			stone_kill_frame[STONE_NORTH]
++		);
++		if(stone_kill_frame[STONE_NORTH] >= 24) {
++			sub_FFF8(
++				(stone_left[STONE_NORTH] + 8),
++				(stone_top[STONE_NORTH] + 8),
++				(stone_kill_frame[STONE_NORTH] - 24)
++			);
++		}
++		if(stone_kill_frame[STONE_NORTH] < 32) {
++			super_roll_put(
++				stone_left[STONE_NORTH], vram_top, stone_patnum[STONE_NORTH]
++			);
++			stone_kill_frame[STONE_NORTH]++;
++			return 0;
++		}
++		if(stone_kill_frame[STONE_NORTH] == 56) {
++			angle_1E510 = -0x20;
++		}
++		patnum += ((stone_kill_frame[STONE_NORTH] - 32) / 8);
++	} else {
++		patnum += (stone_kill_frame[stone] / 8);
++	}
++	stone_kill_frame[stone]++;
++	if(stone_kill_frame[stone] >= frames) {
++		stone_kill_frame[stone] = 0;
++		stone_flag[stone] = SF_REMOVE;
++		return 1;
++	}
++	super_put(stone_left[stone], vram_top, patnum);
++	return 0;
++}
++
++void near stones_11877(void)
++{
++	register int i;
++	register int damage;
++
++	stones_pattern_frame++;
++	for(i = 0; i < STONE_COUNT; i++) {
++		if(stone_flag[i] > SF_ACTIVE) {
++			continue;
++		}
++		if(
++			!(damage = shots_hittest(stone_left[i], stone_top[i], STONE_W, 40))
++			|| (stone_flag[i] != SF_ACTIVE)
++		) {
++			continue;
++		}
++		stone_unknown[i] = 1;
++		stone_damage[i] += damage;
++		if(
++			(
++				(i == STONE_NORTH) ? 930 : (i <= STONE_INNER_EAST) ? 140 : 120
++			) <= stone_damage[i]
++		) {
++			stone_flag[i] = SF_KILL_ANIM;
++			score_delta += 30000;
++			if(i <= STONE_OUTER_EAST) {
++				items_add(
++					(stone_left[i] + 8),
++					(stone_top[i] + 12),
++					((i == 0) ? static_cast<int>(IT_BOMB) : (i <= 2) ? static_cast<int>(IT_BIGPOWER) : IT_BOMB)
++				);
++				snd_se_play(2);
++			} else {
++				player_invincibility_time = BOSS_DEFEAT_INVINCIBILITY_FRAMES;
++			}
++		}
++	}
++	for(i = 0; i < STONE_COUNT; i++) {
++		if(stone_flag[i] == SF_ACTIVE) {
++			shot_target_left = (stone_left[i] + 8);
++			shot_target_top = (stone_top[i] + 8);
++			break;
++		}
++	}
++	if(player_topleft.y < (PLAYFIELD_TOP + 80)) {
++		bullets_add_pellet(
++			stones_bullet_left,
++			stones_bullet_top,
++			(randring2_next8_and(0x0F) - 7),
++			BG_1_AIMED,
++			((4 << 4) + 13)
++		);
++	}
++}
++
++void near stones_11997(void)
++{
++	if(rank != RANK_EASY) {
++		byte_2066E = BG_5_SPREAD_WIDE_AIMED;
++		byte_2066F = 0;
++		group_20670 = BG_8_RING;
++		byte_20671 = BG_4_RING;
++	} else {
++		byte_2066E = BG_3_SPREAD_WIDE_AIMED;
++		byte_2066F = 2;
++		group_20670 = BG_4_RING;
++		byte_20671 = BG_2_RING;
++	}
++}
++
++void near stones_119CD(void)
++{
++	register int i;
++
++	if(boss_phase_frame < 30) {
++		return;
++	}
++	if(boss_phase_frame < 180) {
++		if((boss_phase_frame % 24) == 0) {
++			for(i = 0; i < 2; i++) {
++				if(stone_flag[i] == SF_ACTIVE) {
++					bullets_add_pellet(
++						(stone_left[i] + 12),
++						(stone_top[i] + 8),
++						0x00,
++						byte_2066E,
++						((2 << 4) + 6)
++					);
++				}
++			}
++		}
++	} else if(boss_phase_frame >= 200) {
++		if(boss_phase_frame < 310) {
++			if((boss_phase_frame & 0xF) == 0) {
++				for(i = 0; i < STONE_OUTER_WEST; i++) {
++					if(stone_flag[i] == SF_ACTIVE) {
++						bullets_add_16x16(
++							(stone_left[i] + 12),
++							(stone_top[i] + 8),
++							0x00,
++							BG_1_AIMED,
++							PAT_BULLET16_OUTLINED_BALL_RED,
++							(5 << 4)
++						);
++					}
++				}
++			}
++		} else if(boss_phase_frame > 350) {
++			boss_phase_frame = 0;
++		}
++	}
++}
++
++#define stones_outer_spread(i, stone) { \
++	for(stone = STONE_OUTER_WEST; stone < STONE_NORTH; stone++) { \
++		if(stone_flag[stone] == SF_ACTIVE) { \
++			for(i = 0; i < 6; i++) { \
++				bullets_add_16x16( \
++					(stone_left[stone] + 12), \
++					(stone_top[stone] + 8), \
++					(i * 0x2A), \
++					BSM_DECELERATE_THEN_TURN_AIMED, \
++					PAT_BULLET16_OUTLINED_BALL_GREEN, \
++					((3 << 4) + 8) \
++				); \
++			} \
++		} \
++	} \
++}
++
++void pascal near stones_11A87(int stones_removed)
++{
++	register int i;
++	register int stone;
++
++	if(boss_phase_frame < 30) {
++		return;
++	}
++	if(boss_phase_frame < 200) {
++		if((boss_phase_frame % (110 - (stones_removed * 20))) == 0) {
++			stones_outer_spread(i, stone);
++		}
++	} else {
++		if((boss_phase_frame % (90 - (stones_removed * 20))) == 0) {
++			stones_outer_spread(i, stone);
++		}
++	}
++}
++
++void near stones_11B5D(void)
++{
++	if(boss_phase_frame < 50) {
++		return;
++	}
++	if(boss_phase_frame == 50) {
++		pillar_frames_new = 36;
++		pillar_add(48, 96, 16, 0x67);
++		pillar_add(192, 96, 16, 0x67);
++		pillar_add(240, 96, 16, 0x67);
++		pillar_add(384, 96, 16, 0x67);
++	} else if(boss_phase_frame == 80) {
++		pillar_add(80, 96, 16, 0x67);
++		pillar_add(160, 96, 16, 0x67);
++		pillar_add(272, 96, 16, 0x67);
++		pillar_add(352, 96, 16, 0x67);
++		boss_phase_frame = 0;
++	}
++}
++
++void near stones_11BFE(void)
++{
++	if((boss_phase_frame & 3) == 0) {
++		bullets_add_pellet(
++			stones_bullet_left,
++			stones_bullet_top,
++			angle_1EB28,
++			BG_2_SPREAD_HORIZONTALLY_SYMMETRIC,
++			((4 << 4) + 6)
++		);
++		angle_1EB28 += 8;
++		if(angle_1EB28 > 0x82) {
++			boss_phase_frame = 0;
++			angle_1EB28 = 0;
++		}
++	}
++}
++
++void near stones_11C37(void)
++{
++	screen_x_t left;
++
++	if(boss_phase_frame < 24) {
++		return;
++	}
++	if((boss_phase_frame % (28 - (rank * 3))) == 0) {
++		pillar_frames_new = 30;
++		left = ((player_topleft.x + (PLAYER_W / 2)) & 0xFFF0);
++		pillar_add(left, 96, 16, 0x67);
++	}
++	if(boss_phase_frame >= 140) {
++		boss_phase_frame = 0;
++	}
++}
++
++void near stones_11C8A(void)
++{
++	unsigned char angle_1;
++	unsigned char angle_2;
++
++	if(boss_phase_frame < 40) {
++		if((boss_phase_frame % 6) == 0) {
++			angle_1 = iatan2(
++				(player_topleft.y - 32),
++				(player_topleft.x - stone_left[STONE_NORTH])
++			);
++			angle_2 = (randring2_next8_and(0x1F) + 0x10);
++			bullets_add_pellet(
++				stones_bullet_left,
++				stones_bullet_top,
++				(angle_1 + angle_2),
++				BG_1,
++				(5 << 4)
++			);
++			bullets_add_pellet(
++				stones_bullet_left,
++				stones_bullet_top,
++				(angle_1 - angle_2),
++				BG_1,
++				(5 << 4)
++			);
++		}
++	} else if(boss_phase_frame < 102) {
++		if((boss_phase_frame % 6) == 0) {
++			angle_1 = iatan2(
++				(player_topleft.y - 32),
++				(player_topleft.x - stone_left[STONE_NORTH])
++			);
++			angle_2 = (0x5F - boss_phase_frame);
++			bullets_add_pellet(
++				stones_bullet_left,
++				stones_bullet_top,
++				(angle_1 + angle_2),
++				BG_1,
++				(5 << 4)
++			);
++			bullets_add_pellet(
++				stones_bullet_left,
++				stones_bullet_top,
++				(angle_1 - angle_2),
++				BG_1,
++				(5 << 4)
++			);
++		}
++	} else {
++		boss_phase_frame = 0;
++	}
++}
++
++void near stones_11D30(void)
++{
++	if(boss_phase_frame < 16) {
++		return;
++	}
++	if(boss_phase_frame == 16) {
++		stones_pillar_left = 32;
++		stones_pillar_state = 0;
++	}
++	if((stones_pillar_state == 0) && ((boss_phase_frame & 7) == 0)) {
++		pillar_frames_new = 16;
++		pillar_add(stones_pillar_left, 96, 3, 0x6F);
++		pillar_add((432 - stones_pillar_left), 96, 3, 0x6F);
++		stones_pillar_left += 16;
++		if(stones_pillar_left > 176) {
++			stones_pillar_state = 1;
++			stones_pillar_left += 16;
++		}
++	}
++	if(stones_pillar_state > 36) {
++		if((boss_phase_frame & 7) == 0) {
++			pillar_add(stones_pillar_left, 96, 1, 0x6F);
++			pillar_add((432 - stones_pillar_left), 96, 1, 0x6F);
++			stones_pillar_left -= 16;
++			if(stones_pillar_left < 64) {
++				stones_pillar_state = 0;
++				boss_phase_frame = 0;
++				stones_pillar_left = 32;
++			}
++		}
++	} else if(stones_pillar_state != 0) {
++		stones_pillar_state++;
++	}
++}
+ 
+ void near stones_11DF6(void)
+ {
+diff --git a/th02/main/pillar.cpp b/th02/main/pillar.cpp
+index 941bfdf6..27297872 100644
+--- a/th02/main/pillar.cpp
++++ b/th02/main/pillar.cpp
+@@ -61,7 +61,7 @@ void sub_129FC(void)
+ }
+ 
+ void pascal near pillar_add(
+-	screen_x_t left, screen_y_t top, int duration, uint8_t patnum
++	screen_x_t left, screen_y_t top, int duration, int patnum
+ )
+ {
+ 	register pillar_t near *p = pillars;
+diff --git a/th02_main.asm b/th02_main.asm
+index 77810212..16e38610 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -1884,930 +1884,14 @@ SF_REMOVED = 4
+ 
+ ; Attributes: bp-based frame
+ 
+-public @stones_bg_render$qv
+-@stones_bg_render$qv	proc far
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		xor	si, si
+-		jmp	short loc_116E4
+-; ---------------------------------------------------------------------------
+-
+-loc_116B5:
+-		cmp	_stone_flag[si], SF_REMOVED
+-		jnb	short loc_116E3
+-		mov	bx, si
+-		add	bx, bx
+-		push	_stone_left[bx]	; left
+-		mov	bx, si
+-		add	bx, bx
+-		push	_stone_top[bx]	; top
+-		push	(32 shl 16) or 32	; (w shl 16) or h
+-		call	@tiles_invalidate_rect$qiiii
+-		cmp	_stone_flag[si], SF_REMOVE
+-		jnz	short loc_116E3
+-		mov	_stone_flag[si], SF_REMOVED
+-
+-loc_116E3:
+-		inc	si
+-
+-loc_116E4:
+-		cmp	si, STONE_COUNT
+-		jl	short loc_116B5
+-		pop	si
+-		pop	bp
+-		retf
+-@stones_bg_render$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @stones_116EC$qv
+-@stones_116EC$qv	proc near
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		push	di
+-		xor	si, si
+-		jmp	short loc_1175D
+-; ---------------------------------------------------------------------------
+-
+-loc_116F5:
+-		cmp	_stone_flag[si], SF_KILL_ANIM
+-		jnb	short loc_1175C
+-		mov	bx, si
+-		add	bx, bx
+-		mov	di, _stone_top[bx]
+-		add	di, _scroll_line
+-		cmp	di, RES_Y
+-		jl	short loc_11712
+-		sub	di, RES_Y
+-
+-loc_11712:
+-		cmp	byte ptr [si+2BF5h], 0
+-		jz	short loc_11746
+-		call	_snd_se_play c, 4
+-		mov	bx, si
+-		add	bx, bx
+-		push	_stone_left[bx]
+-		push	di
+-		mov	bx, si
+-		add	bx, bx
+-		push	word ptr _stone_patnum[bx]
+-		pushd	PLANE_PUT or GC_BRGI
+-		call	super_roll_put_1plane
+-		mov	byte ptr [si+2BF5h], 0
+-		jmp	short loc_1175C
+-; ---------------------------------------------------------------------------
+-
+-loc_11746:
+-		mov	bx, si
+-		add	bx, bx
+-		push	_stone_left[bx]
+-		push	di
+-		mov	bx, si
+-		add	bx, bx
+-		push	word ptr _stone_patnum[bx]
+-		call	super_roll_put
+-
+-loc_1175C:
+-		inc	si
+-
+-loc_1175D:
+-		cmp	si, STONE_COUNT
+-		jl	short loc_116F5
+-		pop	di
+-		pop	si
+-		pop	bp
+-		retn
+-@stones_116EC$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @STONES_11766$QI
+-@STONES_11766$QI	proc near
+-
+-var_4		= word ptr -4
+-var_2		= word ptr -2
+-@@i	= word ptr  4
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		push	si
+-		push	di
+-		mov	si, [bp+@@i]
+-		mov	[bp+var_4], 40h
+-		mov	bx, si
+-		add	bx, bx
+-		mov	ax, _stone_left[bx]
+-		add	ax, 16
+-		push	ax	; left
+-		mov	bx, si
+-		add	bx, bx
+-		mov	ax, _stone_top[bx]
+-		add	ax, 12
+-		push	ax	; top
+-		push	((5 shl 4) shl 16) or 2	; (speed_base shl 16) or count
+-		push	0	; as_sprite
+-		call	@sparks_add$qiuiiii
+-		mov	[bp+var_2], 0Ah
+-		mov	bx, si
+-		add	bx, bx
+-		mov	di, _stone_top[bx]
+-		add	di, _scroll_line
+-		cmp	di, RES_Y
+-		jl	short loc_117B6
+-		sub	di, RES_Y
+-
+-loc_117B6:
+-		cmp	si, 4
+-		jnz	short loc_11824
+-		add	[bp+var_4], 20h	; ' '
+-		mov	ax, _stone_left[STONE_NORTH * word]
+-		add	ax, 8
+-		push	ax
+-		mov	ax, _stone_top[STONE_NORTH * word]
+-		add	ax, 8
+-		push	ax
+-		push	word_1EB26
+-		call	@SUB_FFF8$QIII
+-		cmp	word_1EB26, 18h
+-		jl	short loc_117F3
+-		mov	ax, _stone_left[STONE_NORTH * word]
+-		add	ax, 8
+-		push	ax
+-		mov	ax, _stone_top[STONE_NORTH * word]
+-		add	ax, 8
+-		push	ax
+-		mov	ax, word_1EB26
+-		add	ax, 0FFE8h
+-		push	ax
+-		call	@SUB_FFF8$QIII
+-
+-loc_117F3:
+-		cmp	word_1EB26, 20h	; ' '
+-		jge	short loc_11810
+-		call	super_roll_put pascal, _stone_left[STONE_NORTH * word], di, _stone_patnum[STONE_NORTH * word]
+-		inc	word_1EB26
+-		xor	ax, ax
+-		jmp	short loc_11871
+-; ---------------------------------------------------------------------------
+-
+-loc_11810:
+-		cmp	word_1EB26, 38h	; '8'
+-		jnz	short loc_1181C
+-		mov	_angle_1E510, -20h
+-
+-loc_1181C:
+-		mov	ax, word_1EB26
+-		add	ax, 0FFE0h
+-		jmp	short loc_1182C
+-; ---------------------------------------------------------------------------
+-
+-loc_11824:
+-		mov	bx, si
+-		add	bx, bx
+-		mov	ax, [bx+10AEh]
+-
+-loc_1182C:
+-		mov	bx, 8
+-		cwd
+-		idiv	bx
+-		add	[bp+var_2], ax
+-		mov	bx, si
+-		add	bx, bx
+-		inc	word ptr [bx+10AEh]
+-		mov	bx, si
+-		add	bx, bx
+-		mov	ax, [bx+10AEh]
+-		cmp	ax, [bp+var_4]
+-		jl	short loc_1185E
+-		mov	bx, si
+-		add	bx, bx
+-		mov	word ptr [bx+10AEh], 0
+-		mov	_stone_flag[si], SF_REMOVE
+-		mov	ax, 1
+-		jmp	short loc_11871
+-; ---------------------------------------------------------------------------
+-
+-loc_1185E:
+-		mov	bx, si
+-		add	bx, bx
+-		call	super_put pascal, _stone_left[bx], di, [bp+var_2]
+-		xor	ax, ax
+-
+-loc_11871:
+-		pop	di
+-		pop	si
+-		leave
+-		retn	2
+-@STONES_11766$QI	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @stones_11877$qv
+-@stones_11877$qv	proc near
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		push	di
+-		inc	_stones_pattern_frame
+-		xor	si, si
+-		jmp	loc_1193F
+-; ---------------------------------------------------------------------------
+-
+-loc_11885:
+-		cmp	_stone_flag[si], SF_ACTIVE
+-		ja	loc_1193E
+-		mov	bx, si
+-		add	bx, bx
+-		push	_stone_left[bx]
+-		mov	bx, si
+-		add	bx, bx
+-		push	_stone_top[bx]
+-		push	200028h
+-		call	@SHOTS_HITTEST$QIIII
+-		mov	di, ax
+-		or	ax, ax
+-		jz	loc_1193E
+-		cmp	_stone_flag[si], SF_ACTIVE
+-		jnz	loc_1193E
+-		mov	byte ptr [si+2BF5h], 1
+-		mov	bx, si
+-		add	bx, bx
+-		add	_stone_damage[bx], di
+-		cmp	si, 4
+-		jnz	short loc_118CF
+-		mov	ax, 930
+-		jmp	short loc_118DC
+-; ---------------------------------------------------------------------------
+-
+-loc_118CF:
+-		cmp	si, 1
+-		jg	short loc_118D9
+-		mov	ax, 140
+-		jmp	short loc_118DC
+-; ---------------------------------------------------------------------------
+-
+-loc_118D9:
+-		mov	ax, 120
+-
+-loc_118DC:
+-		mov	bx, si
+-		add	bx, bx
+-		cmp	ax, _stone_damage[bx]
+-		jg	short loc_1193E
+-		mov	_stone_flag[si], SF_KILL_ANIM
+-		add	_score_delta, 30000
+-		cmp	si, 3
+-		jg	short loc_11939
+-		mov	bx, si
+-		add	bx, bx
+-		mov	ax, _stone_left[bx]
+-		add	ax, 8
+-		push	ax	; left
+-		mov	bx, si
+-		add	bx, bx
+-		mov	ax, _stone_top[bx]
+-		add	ax, 12
+-		push	ax	; top
+-		or	si, si
+-		jnz	short loc_1191A
+-		mov	ax, IT_BOMB
+-		jmp	short loc_11927
+-; ---------------------------------------------------------------------------
+-
+-loc_1191A:
+-		cmp	si, IT_BOMB
+-		jg	short loc_11924
+-		mov	ax, IT_BIGPOWER
+-		jmp	short loc_11927
+-; ---------------------------------------------------------------------------
+-
+-loc_11924:
+-		mov	ax, IT_BOMB
+-
+-loc_11927:
+-		push	ax	; type
+-		call	@items_add$qiii
+-		call	_snd_se_play c, 2
+-		jmp	short loc_1193E
+-; ---------------------------------------------------------------------------
+-
+-loc_11939:
+-		mov	_player_invincibility_time, BOSS_DEFEAT_INVINCIBILITY_FRAMES
+-
+-loc_1193E:
+-		inc	si
+-
+-loc_1193F:
+-		cmp	si, STONE_COUNT
+-		jl	loc_11885
+-		xor	si, si
+-		jmp	short loc_11970
+-; ---------------------------------------------------------------------------
+-
+-loc_1194A:
+-		cmp	_stone_flag[si], SF_ACTIVE
+-		jnz	short loc_1196F
+-		mov	bx, si
+-		add	bx, bx
+-		mov	ax, _stone_left[bx]
+-		add	ax, 8
+-		mov	_shot_target_left, ax
+-		mov	bx, si
+-		add	bx, bx
+-		mov	ax, _stone_top[bx]
+-		add	ax, 8
+-		mov	_shot_target_top, ax
+-		jmp	short loc_11975
+-; ---------------------------------------------------------------------------
+-
+-loc_1196F:
+-		inc	si
+-
+-loc_11970:
+-		cmp	si, STONE_COUNT
+-		jl	short loc_1194A
+-
+-loc_11975:
+-		cmp	_player_topleft.y, (PLAYFIELD_TOP + 80)
+-		jge	short loc_11993
+-		push	_stones_bullet_left	; left
+-		push	_stones_bullet_top	; top
+-		call	@randring2_next8_and$quc pascal, 0Fh
+-		add	al, -07h
+-		push	ax	; angle
+-		push	BG_1_AIMED	; group
+-		push	((4 shl 4) + 13)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-
+-loc_11993:
+-		pop	di
+-		pop	si
+-		pop	bp
+-		retn
+-@stones_11877$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @stones_11997$qv
+-@stones_11997$qv	proc near
+-		push	bp
+-		mov	bp, sp
+-		cmp	_rank, RANK_EASY
+-		jz	short loc_119B7
+-		mov	_byte_2066E, 18h
+-		mov	_byte_2066F, 0
+-		mov	_group_20670, BG_8_RING
+-		mov	_byte_20671, 21h
+-		pop	bp
+-		retn
+-; ---------------------------------------------------------------------------
+-
+-loc_119B7:
+-		mov	_byte_2066E, 0Ch
+-		mov	_byte_2066F, 2
+-		mov	_group_20670, BG_4_RING
+-		mov	_byte_20671, 22h
+-		pop	bp
+-		retn
+-@stones_11997$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @stones_119CD$qv
+-@stones_119CD$qv	proc near
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		cmp	_boss_phase_frame, 30
+-		jl	loc_11A84
+-		cmp	_boss_phase_frame, 180
+-		jge	short loc_11A27
+-		mov	ax, _boss_phase_frame
+-		mov	bx, 24
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jnz	loc_11A84
+-		xor	si, si
+-		jmp	short loc_11A20
+-; ---------------------------------------------------------------------------
+-
+-loc_119F5:
+-		cmp	_stone_flag[si], SF_ACTIVE
+-		jnz	short loc_11A1F
+-		mov	bx, si
+-		add	bx, bx
+-		mov	ax, _stone_left[bx]
+-		add	ax, 12
+-		push	ax	; left
+-		mov	bx, si
+-		add	bx, bx
+-		mov	ax, _stone_top[bx]
+-		add	ax, 8
+-		push	ax	; top
+-		push	00h	; angle
+-		push	word ptr _byte_2066E	; group
+-		push	((2 shl 4) + 6)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-
+-loc_11A1F:
+-		inc	si
+-
+-loc_11A20:
+-		cmp	si, 2
+-		jl	short loc_119F5
+-		jmp	short loc_11A84
+-; ---------------------------------------------------------------------------
+-
+-loc_11A27:
+-		cmp	_boss_phase_frame, 200
+-		jl	short loc_11A84
+-		cmp	_boss_phase_frame, 310
+-		jge	short loc_11A76
+-		test	byte ptr _boss_phase_frame, 0Fh
+-		jnz	short loc_11A84
+-		xor	si, si
+-		jmp	short loc_11A6F
+-; ---------------------------------------------------------------------------
+-
+-loc_11A42:
+-		cmp	_stone_flag[si], SF_ACTIVE
+-		jnz	short loc_11A6E
+-		mov	bx, si
+-		add	bx, bx
+-		mov	ax, _stone_left[bx]
+-		add	ax, 12
+-		push	ax	; left
+-		mov	bx, si
+-		add	bx, bx
+-		mov	ax, _stone_top[bx]
+-		add	ax, 8
+-		push	ax	; top
+-		push	0	; angle
+-		push	BG_1_AIMED	; group
+-		push	(PAT_BULLET16_OUTLINED_BALL_RED shl 16) or (5 shl 4)	; (patnum shl 16) or speed
+-		call	@bullets_add_16x16$qiiuc32bullet_group_or_special_motion_tii
+-
+-loc_11A6E:
+-		inc	si
+-
+-loc_11A6F:
+-		cmp	si, STONE_OUTER_WEST
+-		jl	short loc_11A42
+-		jmp	short loc_11A84
+-; ---------------------------------------------------------------------------
+-
+-loc_11A76:
+-		cmp	_boss_phase_frame, 350
+-		jle	short loc_11A84
+-		mov	_boss_phase_frame, 0
+-
+-loc_11A84:
+-		pop	si
+-		pop	bp
+-		retn
+-@stones_119CD$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @STONES_11A87$QI
+-@STONES_11A87$QI	proc near
+-
+-arg_0		= word ptr  4
+-
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		push	di
+-		cmp	_boss_phase_frame, 30
+-		jl	loc_11B57
+-		cmp	_boss_phase_frame, 200
+-		jge	short loc_11AFC
+-		mov	ax, [bp+arg_0]
+-		imul	ax, 20
+-		mov	bx, 110
+-		sub	bx, ax
+-		mov	ax, _boss_phase_frame
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jnz	loc_11B57
+-		mov	di, STONE_OUTER_WEST
+-		jmp	short loc_11AF5
+-; ---------------------------------------------------------------------------
+-
+-loc_11AB9:
+-		cmp	_stone_flag[di], SF_ACTIVE
+-		jnz	short loc_11AF4
+-		xor	si, si
+-		jmp	short loc_11AEF
+-; ---------------------------------------------------------------------------
+-
+-loc_11AC4:
+-		mov	bx, di
+-		add	bx, bx
+-		mov	ax, _stone_left[bx]
+-		add	ax, 12
+-		push	ax	; left
+-		mov	bx, di
+-		add	bx, bx
+-		mov	ax, _stone_top[bx]
+-		add	ax, 8
+-		push	ax	; top
+-		mov	ax, si
+-		imul	ax, 2Ah
+-		push	ax	; angle
+-		push	BSM_DECELERATE_THEN_TURN_AIMED	; group
+-		push	(PAT_BULLET16_OUTLINED_BALL_GREEN shl 16) or ((3 shl 4) + 8)	; (patnum shl 16) or speed
+-		call	@bullets_add_16x16$qiiuc32bullet_group_or_special_motion_tii
+-		inc	si
+-
+-loc_11AEF:
+-		cmp	si, 6
+-		jl	short loc_11AC4
+-
+-loc_11AF4:
+-		inc	di
+-
+-loc_11AF5:
+-		cmp	di, STONE_NORTH
+-		jl	short loc_11AB9
+-		jmp	short loc_11B57
+-; ---------------------------------------------------------------------------
+-
+-loc_11AFC:
+-		mov	ax, [bp+arg_0]
+-		imul	ax, 20
+-		mov	bx, 90
+-		sub	bx, ax
+-		mov	ax, _boss_phase_frame
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jnz	short loc_11B57
+-		mov	di, STONE_OUTER_WEST
+-		jmp	short loc_11B52
+-; ---------------------------------------------------------------------------
+-
+-loc_11B16:
+-		cmp	_stone_flag[di], SF_ACTIVE
+-		jnz	short loc_11B51
+-		xor	si, si
+-		jmp	short loc_11B4C
+-; ---------------------------------------------------------------------------
+-
+-loc_11B21:
+-		mov	bx, di
+-		add	bx, bx
+-		mov	ax, _stone_left[bx]
+-		add	ax, 12
+-		push	ax	; left
+-		mov	bx, di
+-		add	bx, bx
+-		mov	ax, _stone_top[bx]
+-		add	ax, 8
+-		push	ax	; top
+-		mov	ax, si
+-		imul	ax, 2Ah
+-		push	ax	; angle
+-		push	BSM_DECELERATE_THEN_TURN_AIMED	; group
+-		push	(PAT_BULLET16_OUTLINED_BALL_GREEN shl 16) or ((3 shl 4) + 8)	; (patnum shl 16) or speed
+-		call	@bullets_add_16x16$qiiuc32bullet_group_or_special_motion_tii
+-		inc	si
+-
+-loc_11B4C:
+-		cmp	si, 6
+-		jl	short loc_11B21
+-
+-loc_11B51:
+-		inc	di
+-
+-loc_11B52:
+-		cmp	di, STONE_NORTH
+-		jl	short loc_11B16
+-
+-loc_11B57:
+-		pop	di
+-		pop	si
+-		pop	bp
+-		retn	2
+-@STONES_11A87$QI	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @stones_11B5D$qv
+-@stones_11B5D$qv	proc near
+-		push	bp
+-		mov	bp, sp
+-		cmp	_boss_phase_frame, 50
+-		jl	loc_11BFC
+-		cmp	_boss_phase_frame, 50
+-		jnz	short loc_11BB3
+-		mov	_pillar_frames_new, 24h	; '$'
+-		push	300060h
+-		push	100067h
+-		call	@PILLAR_ADD$QIIIUC
+-		push	0C00060h
+-		push	100067h
+-		call	@PILLAR_ADD$QIIIUC
+-		push	0F00060h
+-		push	100067h
+-		call	@PILLAR_ADD$QIIIUC
+-		push	1800060h
+-		push	100067h
+-		call	@PILLAR_ADD$QIIIUC
+-		pop	bp
+-		retn
+-; ---------------------------------------------------------------------------
+-
+-loc_11BB3:
+-		cmp	_boss_phase_frame, 80
+-		jnz	short loc_11BFC
+-		push	500060h
+-		push	100067h
+-		call	@PILLAR_ADD$QIIIUC
+-		push	0A00060h
+-		push	100067h
+-		call	@PILLAR_ADD$QIIIUC
+-		push	1100060h
+-		push	100067h
+-		call	@PILLAR_ADD$QIIIUC
+-		push	1600060h
+-		push	100067h
+-		call	@PILLAR_ADD$QIIIUC
+-		mov	_boss_phase_frame, 0
+-
+-loc_11BFC:
+-		pop	bp
+-		retn
+-@stones_11B5D$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @stones_11BFE$qv
+-@stones_11BFE$qv	proc near
+-		push	bp
+-		mov	bp, sp
+-		test	byte ptr _boss_phase_frame, 3
+-		jnz	short loc_11C35
+-		call	@bullets_add_pellet$qiiucuci pascal, _stones_bullet_left, _stones_bullet_top, word ptr angle_1EB28, BG_2_SPREAD_HORIZONTALLY_SYMMETRIC, ((4 shl 4) + 6)
+-		mov	al, angle_1EB28
+-		add	al, 8
+-		mov	angle_1EB28, al
+-		cmp	angle_1EB28, -7Eh
+-		jbe	short loc_11C35
+-		mov	_boss_phase_frame, 0
+-		mov	angle_1EB28, 0
+-
+-loc_11C35:
+-		pop	bp
+-		retn
+-@stones_11BFE$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @stones_11C37$qv
+-@stones_11C37$qv	proc near
+-
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 2
+-		cmp	_boss_phase_frame, 24
+-		jl	short locret_11C88
+-		mov	al, _rank
+-		cbw
+-		mov	dx, ax
+-		add	dx, dx
+-		add	dx, ax
+-		mov	bx, 28
+-		sub	bx, dx
+-		mov	ax, _boss_phase_frame
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jnz	short loc_11C7A
+-		mov	_pillar_frames_new, 1Eh
+-		mov	ax, _player_topleft.x
+-		add	ax, (PLAYER_W / 2)
+-		and	ax, 0FFF0h
+-		mov	[bp+var_2], ax
+-		push	ax
+-		push	600010h
+-		push	67h ; 'g'
+-		call	@PILLAR_ADD$QIIIUC
+-
+-loc_11C7A:
+-		cmp	_boss_phase_frame, 140
+-		jl	short locret_11C88
+-		mov	_boss_phase_frame, 0
+-
+-locret_11C88:
+-		leave
+-		retn
+-@stones_11C37$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @stones_11C8A$qv
+-@stones_11C8A$qv	proc near
+-
+-@@angle_2	= byte ptr -2
+-@@angle_1	= byte ptr -1
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 2
+-		cmp	_boss_phase_frame, 40
+-		jge	short loc_11CF5
+-		mov	ax, _boss_phase_frame
+-		mov	bx, 6
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jnz	locret_11D2E
+-		mov	ax, _player_topleft.y
+-		add	ax, -32
+-		push	ax
+-		mov	ax, _player_topleft.x
+-		sub	ax, _stone_left[STONE_NORTH * word]
+-		push	ax
+-		call	iatan2
+-		mov	[bp+@@angle_1], al
+-		call	@randring2_next8_and$quc pascal, 1Fh
+-		add	al, 10h
+-
+-loc_11CC4:
+-		mov	[bp+@@angle_2], al
+-		push	_stones_bullet_left	; left
+-		push	_stones_bullet_top	; top
+-		mov	al, [bp+@@angle_1]
+-		add	al, [bp+@@angle_2]
+-		push	ax	; angle
+-		push	BG_1	; group
+-		push	(5 shl 4)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-		push	_stones_bullet_left	; left
+-		push	_stones_bullet_top	; top
+-		mov	al, [bp+@@angle_1]
+-		sub	al, [bp+@@angle_2]
+-		push	ax	; angle
+-		push	BG_1	; group
+-		push	(5 shl 4)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-		leave
+-		retn
+-; ---------------------------------------------------------------------------
+-
+-loc_11CF5:
+-		cmp	_boss_phase_frame, 102
+-		jge	short loc_11D28
+-		mov	ax, _boss_phase_frame
+-		mov	bx, 6
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jnz	short locret_11D2E
+-		mov	ax, _player_topleft.y
+-		add	ax, -32
+-		push	ax
+-		mov	ax, _player_topleft.x
+-		sub	ax, _stone_left[STONE_NORTH * word]
+-		push	ax
+-		call	iatan2
+-		mov	[bp+@@angle_1], al
+-		mov	al, 5Fh	; '_'
+-		sub	al, byte ptr _boss_phase_frame
+-		jmp	short loc_11CC4
+-; ---------------------------------------------------------------------------
+-
+-loc_11D28:
+-		mov	_boss_phase_frame, 0
+-
+-locret_11D2E:
+-		leave
+-		retn
+-@stones_11C8A$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @stones_11D30$qv
+-@stones_11D30$qv	proc near
+-		push	bp
+-		mov	bp, sp
+-		cmp	_boss_phase_frame, 16
+-		jl	loc_11DF4
+-		cmp	_boss_phase_frame, 16
+-		jnz	short loc_11D4E
+-		mov	word_22FAC, 20h	; ' '
+-		mov	byte_22FAE, 0
+-
+-loc_11D4E:
+-		cmp	byte_22FAE, 0
+-		jnz	short loc_11D9A
+-		test	byte ptr _boss_phase_frame, 7
+-		jnz	short loc_11D9A
+-		mov	_pillar_frames_new, 10h
+-		push	word_22FAC
+-		push	600003h
+-		push	6Fh ; 'o'
+-		call	@PILLAR_ADD$QIIIUC
+-		mov	ax, 1B0h
+-		sub	ax, word_22FAC
+-		push	ax
+-		push	600003h
+-		push	6Fh ; 'o'
+-		call	@PILLAR_ADD$QIIIUC
+-		add	word_22FAC, 10h
+-		cmp	word_22FAC, 0B0h ; '°'
+-		jle	short loc_11D9A
+-		mov	byte_22FAE, 1
+-		add	word_22FAC, 10h
+-
+-loc_11D9A:
+-		cmp	byte_22FAE, 24h	; '$'
+-		jbe	short loc_11DE9
+-		test	byte ptr _boss_phase_frame, 7
+-		jnz	short loc_11DF4
+-		push	word_22FAC
+-		push	600001h
+-		push	6Fh ; 'o'
+-		call	@PILLAR_ADD$QIIIUC
+-		mov	ax, 1B0h
+-		sub	ax, word_22FAC
+-		push	ax
+-		push	600001h
+-		push	6Fh ; 'o'
+-		call	@PILLAR_ADD$QIIIUC
+-		sub	word_22FAC, 10h
+-		cmp	word_22FAC, 40h
+-		jge	short loc_11DF4
+-		mov	byte_22FAE, 0
+-		mov	_boss_phase_frame, 0
+-		mov	word_22FAC, 20h	; ' '
+-		pop	bp
+-		retn
+-; ---------------------------------------------------------------------------
+-
+-loc_11DE9:
+-		cmp	byte_22FAE, 0
+-		jz	short loc_11DF4
+-		inc	byte_22FAE
+-
+-loc_11DF4:
+-		pop	bp
+-		retn
+-@stones_11D30$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
++	extern @stones_bg_render$qv:proc
+ 	extern @stones_update$qv:proc
+ 	extern @stones_end$qv:proc
+ 	extern @stones_init$qv:proc
+ 	extern @SHOTS_HITTEST$QIIII:near
+ 	extern @sub_129DD$qv:proc
+ 	extern @sub_129FC$qv:proc
+-	extern @PILLAR_ADD$QIIIUC:near
++	extern @PILLAR_ADD$QIIII:near
+ DS_PREBOSS = 0
+ DS_POSTBOSS = 1
+ 
+@@ -3802,13 +2886,13 @@ loc_13DCD:
+ 		push	ax
+ 		push	7000A0h
+ 		push	6Fh ; 'o'
+-		call	@PILLAR_ADD$QIIIUC
++		call	@PILLAR_ADD$QIIII
+ 		mov	ax, point_24E7C.x
+ 		add	ax, 46
+ 		push	ax
+ 		push	7000A0h
+ 		push	6Fh ; 'o'
+-		call	@PILLAR_ADD$QIIIUC
++		call	@PILLAR_ADD$QIIII
+ 		jmp	loc_13ECA
+ ; ---------------------------------------------------------------------------
+ 
+@@ -7977,33 +7061,33 @@ loc_161EE:
+ 		push	ax
+ 		push	top_253B8
+ 		push	1006Fh
+-		call	@PILLAR_ADD$QIIIUC
++		call	@PILLAR_ADD$QIIII
+ 		mov	_pillar_frames_new, 30h	; '0'
+ 		mov	ax, point_254E6.x
+ 		add	ax, 44
+ 		push	ax
+ 		push	top_253B8
+ 		push	1006Fh
+-		call	@PILLAR_ADD$QIIIUC
++		call	@PILLAR_ADD$QIIII
+ 		mov	ax, point_254E6.x
+ 		add	ax, 76
+ 		push	ax
+ 		push	top_253B8
+ 		push	1006Fh
+-		call	@PILLAR_ADD$QIIIUC
++		call	@PILLAR_ADD$QIIII
+ 		mov	_pillar_frames_new, 64h	; 'd'
+ 		mov	ax, point_254E6.x
+ 		add	ax, 28
+ 		push	ax
+ 		push	top_253B8
+ 		push	1006Fh
+-		call	@PILLAR_ADD$QIIIUC
++		call	@PILLAR_ADD$QIIII
+ 		mov	ax, point_254E6.x
+ 		add	ax, 92
+ 		push	ax
+ 		push	top_253B8
+ 		push	1006Fh
+-		call	@PILLAR_ADD$QIIIUC
++		call	@PILLAR_ADD$QIIII
+ 		mov	_pillar_frames_new, 10h
+ 
+ loc_162B2:
+@@ -8076,7 +7160,7 @@ loc_16325:
+ 		push	ax
+ 		push	top_253B8
+ 		push	1006Fh
+-		call	@PILLAR_ADD$QIIIUC
++		call	@PILLAR_ADD$QIIII
+ 
+ loc_1634B:
+ 		mov	al, byte_255A3
+@@ -8091,7 +7175,7 @@ loc_1634B:
+ 		push	ax
+ 		push	top_253B8
+ 		push	1006Fh
+-		call	@PILLAR_ADD$QIIIUC
++		call	@PILLAR_ADD$QIIII
+ 		jmp	loc_1641D
+ ; ---------------------------------------------------------------------------
+ 
+@@ -8112,7 +7196,7 @@ loc_1637C:
+ 		push	ax
+ 		push	top_253B8
+ 		push	1006Fh
+-		call	@PILLAR_ADD$QIIIUC
++		call	@PILLAR_ADD$QIIII
+ 		mov	al, byte_255A3
+ 		cbw
+ 		add	ax, ax
+@@ -8124,7 +7208,7 @@ loc_1637C:
+ 		push	ax
+ 		push	top_253B8
+ 		push	1006Fh
+-		call	@PILLAR_ADD$QIIIUC
++		call	@PILLAR_ADD$QIIII
+ 		mov	byte_255A3, 0
+ 		jmp	short loc_1641D
+ ; ---------------------------------------------------------------------------
+@@ -11598,7 +10682,7 @@ midboss4_1A17E	proc near
+ 		push	ax
+ 		push	500006h
+ 		push	6Fh ; 'o'
+-		call	@PILLAR_ADD$QIIIUC
++		call	@PILLAR_ADD$QIIII
+ 
+ loc_1A1B4:
+ 		pop	bp
+@@ -12875,16 +11959,10 @@ _POWER_RESET_FOR	db 1, 1, 4, 8, 16, 24, 32, 40, 52, 64
+ public _midboss3_kill_frame
+ _midboss3_kill_frame	dw MIDBOSS3_COUNT dup(0)
+ 
+-		db    0
+-		db    0
+-		db    0
+-		db    0
+-		db    0
+-		db    0
+-		db    0
+-		db    0
+-word_1EB26	dw 0
+-angle_1EB28	db 0
++public _stone_kill_frame
++_stone_kill_frame	dw 5 dup(0)
++public _angle_1EB28
++_angle_1EB28	db 0
+ public _STONES_RING_ORDER_LEFT, _STONES_RING_ORDER_RIGHT
+ _STONES_RING_ORDER_LEFT	db 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+ _STONES_RING_ORDER_RIGHT	db 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12
+@@ -13747,8 +12825,10 @@ byte_22FA8	db ?
+ 		db ?
+ public _stones_pattern_frame
+ _stones_pattern_frame	dw ?
+-word_22FAC	dw ?
+-byte_22FAE	db ?
++public _stones_pillar_left
++_stones_pillar_left	dw ?
++public _stones_pillar_state
++_stones_pillar_state	db ?
+ public _angle_22FAF
+ _angle_22FAF	db ?
+ public _angle_22FB0

@@ -1,0 +1,3540 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 21:57:01 +0100
+Subject: [PATCH] [th02/main] Decompile stage 3: background effect, midboss and
+ the Five Magic Stones
+
+ReC98's stub declaration files th02/main/midboss/m3.cpp and
+th02/main/boss/b3.cpp now hold the code, included by th02/stage3.cpp.
+---
+ Tupfile.lua                |    2 +-
+ th02/main/boss/b3.cpp      | 1006 +++++++++++++++++++++++++++++++++-
+ th02/main/boss/explode.cpp |    2 +-
+ th02/main/boss/stones.cpp  | 1047 ------------------------------------
+ th02/main/midboss/m3.cpp   |  363 ++++++++++++-
+ th02/stage3.cpp            |   53 ++
+ th02_main.asm              |  970 +--------------------------------
+ 7 files changed, 1432 insertions(+), 2011 deletions(-)
+ delete mode 100644 th02/main/boss/stones.cpp
+ create mode 100644 th02/stage3.cpp
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index 75536b32..2a899c65 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -530,7 +530,7 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/main/player/shot.cpp",
+ 	"th02/main/player/bombanim.cpp",
+ 	"th02/main/boss/explode.cpp",
+-	"th02/main/boss/stones.cpp",
++	"th02/stage3.cpp",
+ 	"th02/main/hittest.asm",
+ 	"th02/main/pillar.cpp",
+ 	"th01/vplanset.cpp",
+diff --git a/th02/main/boss/b3.cpp b/th02/main/boss/b3.cpp
+index 4cf3b201..1286af92 100644
+--- a/th02/main/boss/b3.cpp
++++ b/th02/main/boss/b3.cpp
+@@ -1,13 +1,1005 @@
+ /// Stage 3 Boss - Five Magic Stones
+ /// --------------------------------
+ 
+-#include "th02/main/boss/b3.hpp"
++extern uint8_t stone_unknown[STONE_COUNT];
+ 
+-// Coordinates
+-// -----------
++extern long stone_frames;
++extern uint8_t stones_phase;
++extern uint8_t stones_pattern;
++extern int stones_pattern_frame;
++extern screen_x_t stones_bullet_left;
++extern screen_y_t stones_bullet_top;
++extern vram_y_t stones_y_22D9C;
++extern unsigned char angle_1E510;
++extern uint8_t pillar_frames_new;
++extern const char aBoss2_m[];
+ 
+-static const pixel_t STONE_W = 32;
++void near dialog_pre(void);
++void near dialog_post(void);
+ 
+-extern screen_x_t stone_left[STONE_COUNT];
+-extern screen_y_t stone_top[STONE_COUNT];
+-// -----------
++void sub_129FC(void);
++void sub_13ABB(char far *fn);
++void sub_17A55(void);
++
++extern uint8_t byte_2066F;
++extern uint8_t group_20670;
++extern uint8_t byte_20671;
++extern unsigned char angle_22FAF;
++extern unsigned char angle_22FB0;
++extern unsigned char angle_22FB1[STONE_COUNT];
++extern uint8_t stones_ring_tile_flag[TILES_X];
++extern uint8_t stones_ring_phase;
++extern uint8_t stones_ring_i;
++extern uint8_t stones_ring_done;
++extern int stones_ring_tile_1;
++extern int stones_ring_tile_2;
++extern int stones_ring_tile_3;
++extern const uint8_t STONES_RING_ORDER_LEFT[TILES_X / 2];
++extern const uint8_t STONES_RING_ORDER_RIGHT[TILES_X / 2];
++
++void pascal near pillar_add(
++	screen_x_t left, screen_y_t top, int duration, int patnum
++);
++
++extern int stone_kill_frame[STONE_COUNT];
++extern uint8_t byte_2066E;
++extern unsigned char angle_1EB28;
++extern screen_x_t stones_pillar_left;
++extern uint8_t stones_pillar_state;
++extern unsigned char player_invincibility_time;
++
++void pascal near sub_FFF8(screen_x_t center_x, screen_y_t center_y, int frame);
++void pascal items_add(screen_x_t left, screen_y_t top, int type);
++
++void stones_bg_render(void)
++{
++	register int i;
++
++	for(i = 0; i < STONE_COUNT; i++) {
++		if(stone_flag[i] < SF_REMOVED) {
++			tiles_invalidate_rect(stone_left[i], stone_top[i], STONE_W, STONE_W);
++			if(stone_flag[i] == SF_REMOVE) {
++				stone_flag[i] = SF_REMOVED;
++			}
++		}
++	}
++}
++
++void near stones_116EC(void)
++{
++	register int i;
++	register vram_y_t vram_top;
++
++	for(i = 0; i < STONE_COUNT; i++) {
++		if(stone_flag[i] < SF_KILL_ANIM) {
++			vram_top = stone_top[i];
++			vram_top += scroll_line;
++			if(vram_top >= RES_Y) {
++				vram_top -= RES_Y;
++			}
++			if(stone_unknown[i]) {
++				snd_se_play(4);
++				super_roll_put_1plane(
++					stone_left[i],
++					vram_top,
++					stone_patnum[i],
++					0,
++					super_plane(V_WHITE)
++				);
++				stone_unknown[i] = 0;
++			} else {
++				super_roll_put(stone_left[i], vram_top, stone_patnum[i]);
++			}
++		}
++	}
++}
++
++int pascal near stones_11766(int stone)
++{
++	int patnum;
++	int frames;
++	vram_y_t vram_top;
++
++	frames = 64;
++	sparks_add(
++		(stone_left[stone] + 16), (stone_top[stone] + 12), (5 << 4), 2, false
++	);
++	patnum = 10;
++	vram_top = stone_top[stone];
++	vram_top += scroll_line;
++	if(vram_top >= RES_Y) {
++		vram_top -= RES_Y;
++	}
++	if(stone == STONE_NORTH) {
++		frames += 32;
++		sub_FFF8(
++			(stone_left[STONE_NORTH] + 8),
++			(stone_top[STONE_NORTH] + 8),
++			stone_kill_frame[STONE_NORTH]
++		);
++		if(stone_kill_frame[STONE_NORTH] >= 24) {
++			sub_FFF8(
++				(stone_left[STONE_NORTH] + 8),
++				(stone_top[STONE_NORTH] + 8),
++				(stone_kill_frame[STONE_NORTH] - 24)
++			);
++		}
++		if(stone_kill_frame[STONE_NORTH] < 32) {
++			super_roll_put(
++				stone_left[STONE_NORTH], vram_top, stone_patnum[STONE_NORTH]
++			);
++			stone_kill_frame[STONE_NORTH]++;
++			return 0;
++		}
++		if(stone_kill_frame[STONE_NORTH] == 56) {
++			angle_1E510 = -0x20;
++		}
++		patnum += ((stone_kill_frame[STONE_NORTH] - 32) / 8);
++	} else {
++		patnum += (stone_kill_frame[stone] / 8);
++	}
++	stone_kill_frame[stone]++;
++	if(stone_kill_frame[stone] >= frames) {
++		stone_kill_frame[stone] = 0;
++		stone_flag[stone] = SF_REMOVE;
++		return 1;
++	}
++	super_put(stone_left[stone], vram_top, patnum);
++	return 0;
++}
++
++void near stones_11877(void)
++{
++	register int i;
++	register int damage;
++
++	stones_pattern_frame++;
++	for(i = 0; i < STONE_COUNT; i++) {
++		if(stone_flag[i] > SF_ACTIVE) {
++			continue;
++		}
++		if(
++			!(damage = shots_hittest(stone_left[i], stone_top[i], STONE_W, 40))
++			|| (stone_flag[i] != SF_ACTIVE)
++		) {
++			continue;
++		}
++		stone_unknown[i] = 1;
++		stone_damage[i] += damage;
++		if(
++			(
++				(i == STONE_NORTH) ? 930 : (i <= STONE_INNER_EAST) ? 140 : 120
++			) <= stone_damage[i]
++		) {
++			stone_flag[i] = SF_KILL_ANIM;
++			score_delta += 30000;
++			if(i <= STONE_OUTER_EAST) {
++				items_add(
++					(stone_left[i] + 8),
++					(stone_top[i] + 12),
++					((i == 0) ? static_cast<int>(IT_BOMB) : (i <= 2) ? static_cast<int>(IT_BIGPOWER) : IT_BOMB)
++				);
++				snd_se_play(2);
++			} else {
++				player_invincibility_time = BOSS_DEFEAT_INVINCIBILITY_FRAMES;
++			}
++		}
++	}
++	for(i = 0; i < STONE_COUNT; i++) {
++		if(stone_flag[i] == SF_ACTIVE) {
++			shot_target_left = (stone_left[i] + 8);
++			shot_target_top = (stone_top[i] + 8);
++			break;
++		}
++	}
++	if(player_topleft.y < (PLAYFIELD_TOP + 80)) {
++		bullets_add_pellet(
++			stones_bullet_left,
++			stones_bullet_top,
++			(randring2_next8_and(0x0F) - 7),
++			BG_1_AIMED,
++			((4 << 4) + 13)
++		);
++	}
++}
++
++void near stones_11997(void)
++{
++	if(rank != RANK_EASY) {
++		byte_2066E = BG_5_SPREAD_WIDE_AIMED;
++		byte_2066F = 0;
++		group_20670 = BG_8_RING;
++		byte_20671 = BG_4_RING;
++	} else {
++		byte_2066E = BG_3_SPREAD_WIDE_AIMED;
++		byte_2066F = 2;
++		group_20670 = BG_4_RING;
++		byte_20671 = BG_2_RING;
++	}
++}
++
++void near stones_119CD(void)
++{
++	register int i;
++
++	if(boss_phase_frame < 30) {
++		return;
++	}
++	if(boss_phase_frame < 180) {
++		if((boss_phase_frame % 24) == 0) {
++			for(i = 0; i < 2; i++) {
++				if(stone_flag[i] == SF_ACTIVE) {
++					bullets_add_pellet(
++						(stone_left[i] + 12),
++						(stone_top[i] + 8),
++						0x00,
++						byte_2066E,
++						((2 << 4) + 6)
++					);
++				}
++			}
++		}
++	} else if(boss_phase_frame >= 200) {
++		if(boss_phase_frame < 310) {
++			if((boss_phase_frame & 0xF) == 0) {
++				for(i = 0; i < STONE_OUTER_WEST; i++) {
++					if(stone_flag[i] == SF_ACTIVE) {
++						bullets_add_16x16(
++							(stone_left[i] + 12),
++							(stone_top[i] + 8),
++							0x00,
++							BG_1_AIMED,
++							PAT_BULLET16_OUTLINED_BALL_RED,
++							(5 << 4)
++						);
++					}
++				}
++			}
++		} else if(boss_phase_frame > 350) {
++			boss_phase_frame = 0;
++		}
++	}
++}
++
++#define stones_outer_spread(i, stone) { \
++	for(stone = STONE_OUTER_WEST; stone < STONE_NORTH; stone++) { \
++		if(stone_flag[stone] == SF_ACTIVE) { \
++			for(i = 0; i < 6; i++) { \
++				bullets_add_16x16( \
++					(stone_left[stone] + 12), \
++					(stone_top[stone] + 8), \
++					(i * 0x2A), \
++					BSM_DECELERATE_THEN_TURN_AIMED, \
++					PAT_BULLET16_OUTLINED_BALL_GREEN, \
++					((3 << 4) + 8) \
++				); \
++			} \
++		} \
++	} \
++}
++
++void pascal near stones_11A87(int stones_removed)
++{
++	register int i;
++	register int stone;
++
++	if(boss_phase_frame < 30) {
++		return;
++	}
++	if(boss_phase_frame < 200) {
++		if((boss_phase_frame % (110 - (stones_removed * 20))) == 0) {
++			stones_outer_spread(i, stone);
++		}
++	} else {
++		if((boss_phase_frame % (90 - (stones_removed * 20))) == 0) {
++			stones_outer_spread(i, stone);
++		}
++	}
++}
++
++void near stones_11B5D(void)
++{
++	if(boss_phase_frame < 50) {
++		return;
++	}
++	if(boss_phase_frame == 50) {
++		pillar_frames_new = 36;
++		pillar_add(48, 96, 16, 0x67);
++		pillar_add(192, 96, 16, 0x67);
++		pillar_add(240, 96, 16, 0x67);
++		pillar_add(384, 96, 16, 0x67);
++	} else if(boss_phase_frame == 80) {
++		pillar_add(80, 96, 16, 0x67);
++		pillar_add(160, 96, 16, 0x67);
++		pillar_add(272, 96, 16, 0x67);
++		pillar_add(352, 96, 16, 0x67);
++		boss_phase_frame = 0;
++	}
++}
++
++void near stones_11BFE(void)
++{
++	if((boss_phase_frame & 3) == 0) {
++		bullets_add_pellet(
++			stones_bullet_left,
++			stones_bullet_top,
++			angle_1EB28,
++			BG_2_SPREAD_HORIZONTALLY_SYMMETRIC,
++			((4 << 4) + 6)
++		);
++		angle_1EB28 += 8;
++		if(angle_1EB28 > 0x82) {
++			boss_phase_frame = 0;
++			angle_1EB28 = 0;
++		}
++	}
++}
++
++void near stones_11C37(void)
++{
++	screen_x_t left;
++
++	if(boss_phase_frame < 24) {
++		return;
++	}
++	if((boss_phase_frame % (28 - (rank * 3))) == 0) {
++		pillar_frames_new = 30;
++		left = ((player_topleft.x + (PLAYER_W / 2)) & 0xFFF0);
++		pillar_add(left, 96, 16, 0x67);
++	}
++	if(boss_phase_frame >= 140) {
++		boss_phase_frame = 0;
++	}
++}
++
++void near stones_11C8A(void)
++{
++	unsigned char angle_1;
++	unsigned char angle_2;
++
++	if(boss_phase_frame < 40) {
++		if((boss_phase_frame % 6) == 0) {
++			angle_1 = iatan2(
++				(player_topleft.y - 32),
++				(player_topleft.x - stone_left[STONE_NORTH])
++			);
++			angle_2 = (randring2_next8_and(0x1F) + 0x10);
++			bullets_add_pellet(
++				stones_bullet_left,
++				stones_bullet_top,
++				(angle_1 + angle_2),
++				BG_1,
++				(5 << 4)
++			);
++			bullets_add_pellet(
++				stones_bullet_left,
++				stones_bullet_top,
++				(angle_1 - angle_2),
++				BG_1,
++				(5 << 4)
++			);
++		}
++	} else if(boss_phase_frame < 102) {
++		if((boss_phase_frame % 6) == 0) {
++			angle_1 = iatan2(
++				(player_topleft.y - 32),
++				(player_topleft.x - stone_left[STONE_NORTH])
++			);
++			angle_2 = (0x5F - boss_phase_frame);
++			bullets_add_pellet(
++				stones_bullet_left,
++				stones_bullet_top,
++				(angle_1 + angle_2),
++				BG_1,
++				(5 << 4)
++			);
++			bullets_add_pellet(
++				stones_bullet_left,
++				stones_bullet_top,
++				(angle_1 - angle_2),
++				BG_1,
++				(5 << 4)
++			);
++		}
++	} else {
++		boss_phase_frame = 0;
++	}
++}
++
++void near stones_11D30(void)
++{
++	if(boss_phase_frame < 16) {
++		return;
++	}
++	if(boss_phase_frame == 16) {
++		stones_pillar_left = 32;
++		stones_pillar_state = 0;
++	}
++	if((stones_pillar_state == 0) && ((boss_phase_frame & 7) == 0)) {
++		pillar_frames_new = 16;
++		pillar_add(stones_pillar_left, 96, 3, 0x6F);
++		pillar_add((432 - stones_pillar_left), 96, 3, 0x6F);
++		stones_pillar_left += 16;
++		if(stones_pillar_left > 176) {
++			stones_pillar_state = 1;
++			stones_pillar_left += 16;
++		}
++	}
++	if(stones_pillar_state > 36) {
++		if((boss_phase_frame & 7) == 0) {
++			pillar_add(stones_pillar_left, 96, 1, 0x6F);
++			pillar_add((432 - stones_pillar_left), 96, 1, 0x6F);
++			stones_pillar_left -= 16;
++			if(stones_pillar_left < 64) {
++				stones_pillar_state = 0;
++				boss_phase_frame = 0;
++				stones_pillar_left = 32;
++			}
++		}
++	} else if(stones_pillar_state != 0) {
++		stones_pillar_state++;
++	}
++}
++
++void near stones_11DF6(void)
++{
++	register int i;
++
++	if((boss_phase_frame & 0xF) == 0) {
++		for(i = byte_2066F; i < STONE_NORTH; i++) {
++			bullets_add_16x16(
++				stone_left[i],
++				stone_top[i],
++				randring2_next8(),
++				BSM_GRAVITY,
++				PAT_BULLET16_OUTLINED_BALL_GREEN,
++				(2 << 4)
++			);
++		}
++	}
++	if(boss_phase_frame > 110) {
++		boss_phase_frame = 0;
++	}
++}
++
++void near stones_11E40(void)
++{
++	if((boss_phase_frame & 3) == 0) {
++		bullets_add_pellet(
++			stones_bullet_left,
++			stones_bullet_top,
++			randring2_next8(),
++			byte_20671,
++			((boss_phase_frame >> 1) + ((1 << 4) + 14))
++		);
++	}
++	if(boss_phase_frame > 130) {
++		boss_phase_frame = 0;
++	}
++}
++
++void near stones_11E76(void)
++{
++	register int i;
++	register int column;
++
++	if(boss_phase_frame < 16) {
++		return;
++	}
++	if(boss_phase_frame < 80) {
++		if((boss_phase_frame % 36) == 0) {
++			pillar_frames_new = 30;
++			column = ((randring2_next8() % 24) + 2);
++			pillar_add((column * 16), 96, 12, 0x6F);
++		}
++		if(((boss_phase_frame % 40) == 0) && (rank != RANK_EASY)) {
++			bullets_add_pellet(
++				stones_bullet_left,
++				stones_bullet_top,
++				0x00,
++				BG_1_AIMED,
++				((4 << 4) + 6)
++			);
++		}
++	} else if(boss_phase_frame < 120) {
++		if(boss_phase_frame == 100) {
++			pillar_frames_new = 30;
++			for(i = 0; i < 3; i++) {
++				column = ((randring2_next8() % 24) + 2);
++				pillar_add((column * 16), 96, 12, 0x6F);
++			}
++		}
++	} else {
++		boss_phase_frame = 0;
++	}
++}
++
++void near stones_11F2F(void)
++{
++	register int i;
++
++	if(boss_phase_frame < 16) {
++		return;
++	}
++	if(boss_phase_frame == 16) {
++		angle_22FAF = 0x29;
++	}
++	if((boss_phase_frame % 30) == 0) {
++		for(i = 0; i < STONE_NORTH; i++) {
++			bullets_add_16x16(
++				stone_left[i],
++				stone_top[i],
++				angle_22FAF,
++				BG_1_AIMED,
++				PAT_BULLET16_OUTLINED_BALL_GREEN,
++				((3 << 4) + 12)
++			);
++			bullets_add_16x16(
++				stone_left[i],
++				stone_top[i],
++				-angle_22FAF,
++				BG_1_AIMED,
++				PAT_BULLET16_OUTLINED_BALL_GREEN,
++				((3 << 4) + 12)
++			);
++		}
++		angle_22FAF -= 3;
++	}
++	if(angle_22FAF >= 0xC8) {
++		boss_phase_frame = 0;
++	}
++}
++
++void near stones_11FB5(void)
++{
++	if(boss_phase_frame == 2) {
++		angle_22FB0 = 0x3E;
++	}
++	if((boss_phase_frame & 7) == 0) {
++		bullets_add_pellet(
++			stones_bullet_left,
++			stones_bullet_top,
++			(0x00 - angle_22FB0),
++			group_20670,
++			(4 << 4)
++		);
++		bullets_add_pellet(
++			stones_bullet_left,
++			stones_bullet_top,
++			angle_22FB0,
++			group_20670,
++			(4 << 4)
++		);
++		angle_22FB0 -= 3;
++		if(angle_22FB0 > 0xC8) {
++			boss_phase_frame = 0;
++		}
++	}
++}
++
++void near stones_1200F(void)
++{
++	register int i;
++
++	if(boss_phase_frame < 60) {
++		return;
++	}
++	if((boss_phase_frame % 64) == 0) {
++		for(i = 0; i < STONE_COUNT; i++) {
++			angle_22FB1[i] = iatan2(
++				(player_topleft.y - 32), (player_topleft.x - stone_left[i])
++			);
++		}
++	}
++	if((boss_phase_frame & 3) == 0) {
++		if(boss_phase_frame < 384) {
++			if(((boss_phase_frame % 64) >> 2) <= 8) {
++				for(i = 0; i < STONE_COUNT; i++) {
++					bullets_add_pellet(
++						(stone_left[i] + 12),
++						(stone_top[i] + 12),
++						angle_22FB1[i],
++						BG_1,
++						(7 << 4)
++					);
++				}
++				snd_se_play(3);
++			}
++		} else {
++			bullets_set_stack_multiplier(0);
++			for(i = 0; i < STONE_COUNT; i++) {
++				bullets_add_16x16(
++					(stone_left[i] + 8),
++					(stone_top[i] + 8),
++					angle_22FB1[STONE_NORTH],
++					BG_4_RING,
++					PAT_BULLET16_BALL,
++					(7 << 4)
++				);
++			}
++			snd_se_play(3);
++		}
++	}
++	if(boss_phase_frame >= 447) {
++		boss_phase_frame = 0;
++		bullets_set_stack_multiplier(1);
++	}
++}
++
++int pascal near stones_120F7(int stone)
++{
++	if((stone == STONE_INNER_WEST) || (stone == STONE_INNER_EAST)) {
++		stone_patnum[stone]++;
++		if(stone_patnum[stone] >= 155) {
++			stone_flag[stone] = SF_ACTIVE;
++			return 1;
++		}
++	} else if((stone == STONE_OUTER_WEST) || (stone == STONE_OUTER_EAST)) {
++		if(stone_patnum[stone] < 152) {
++			stone_patnum[stone]++;
++		}
++		if(stone_patnum[stone] == 152) {
++			stone_patnum[stone] = 156;
++		} else {
++			stone_patnum[stone]++;
++		}
++		if(stone_patnum[stone] >= 159) {
++			stone_flag[stone] = SF_ACTIVE;
++			return 1;
++		}
++	} else if(stone == STONE_NORTH) {
++		if(stone_patnum[STONE_NORTH] < 152) {
++			stone_patnum[STONE_NORTH]++;
++		}
++		if(stone_patnum[STONE_NORTH] == 152) {
++			stone_patnum[STONE_NORTH] = 160;
++		} else {
++			stone_patnum[STONE_NORTH]++;
++		}
++		if(stone_patnum[STONE_NORTH] >= 163) {
++			stone_flag[STONE_NORTH] = SF_ACTIVE;
++			return 1;
++		}
++	}
++	return 0;
++}
++
++int near stones_121BA(void)
++{
++	if(stone_patnum[STONE_NORTH] >= 160) {
++		stone_patnum[STONE_NORTH]--;
++	}
++	if(stone_patnum[STONE_NORTH] == 159) {
++		stone_flag[STONE_NORTH] = SF_DORMANT;
++		stone_patnum[STONE_NORTH] = 151;
++	} else {
++		stone_patnum[STONE_NORTH]--;
++	}
++	if(stone_patnum[STONE_NORTH] <= 148) {
++		return 1;
++	}
++	return 0;
++}
++
++void pascal near stones_ring_step(uint8_t flag)
++{
++	if(boss_phase_frame & 1) {
++		stones_ring_tile_flag[STONES_RING_ORDER_LEFT[stones_ring_i]] = flag;
++		stones_ring_tile_flag[STONES_RING_ORDER_RIGHT[stones_ring_i]] = flag;
++		stones_ring_i++;
++		if(stones_ring_i >= (TILES_X / 2)) {
++			stones_ring_phase++;
++			stones_ring_i = 0;
++		}
++	}
++}
++
++void near stones_ring_put(void)
++{
++	screen_x_t left;
++	register uint8_t near *p = stones_ring_tile_flag;
++	register int i;
++
++	egc_start_copy_noframe();
++	for((i = 0, left = PLAYFIELD_LEFT); i < TILES_X; (i++, left += TILE_W, p++)) {
++		if(*p == 1) {
++			tile_ring_set_and_put_both_8(left, stones_y_22D9C, stones_ring_tile_1);
++			*p = 0;
++		} else if(*p == 2) {
++			tile_ring_set_and_put_both_8(left, stones_y_22D9C, stones_ring_tile_2);
++			*p = 0;
++		} else if(stones_ring_tile_flag[i] == 3) {
++			tile_ring_set_and_put_both_8(left, stones_y_22D9C, stones_ring_tile_3);
++			*p = 0;
++			stones_ring_done++;
++		}
++	}
++	egc_off();
++}
++
++#define stones_ring_animate(tile_1, tile_2, tile_3) { \
++	if(boss_phase_frame < 49) { \
++		return 0; \
++	} \
++	if(boss_phase_frame == 49) { \
++		for(i = 0; i < TILES_X; i++) { \
++			stones_ring_tile_flag[i] = 0; \
++		} \
++		stones_ring_i = 0; \
++		stones_ring_phase = 0; \
++		stones_ring_done = 0; \
++		stones_ring_tile_1 = tile_1; \
++		stones_ring_tile_2 = tile_2; \
++		stones_ring_tile_3 = tile_3; \
++	} else if(stones_ring_phase == 0) { \
++		stones_ring_step(1); \
++	} else if(stones_ring_phase == 1) { \
++		stones_ring_step(2); \
++	} else if(stones_ring_phase == 2) { \
++		stones_ring_step(3); \
++	} \
++	stones_ring_put(); \
++	if(stones_ring_done >= TILES_X) { \
++		return 1; \
++	} \
++	return 0; \
++}
++
++int near stones_122B5(void)
++{
++	register int i;
++	stones_ring_animate(41, 42, 43);
++}
++
++int near stones_1232F(void)
++{
++	register int i;
++	stones_ring_animate(42, 41, 40);
++}
++
++int stones_update(void)
++{
++	register int i;
++	register int removed = 0;
++
++	boss_phase_frame++;
++	stone_frames++;
++	stones_11877();
++	stones_116EC();
++	for(i = 0; i < STONE_COUNT; i++) {
++		if(stone_flag[i] == SF_KILL_ANIM) {
++			stones_11766(i);
++		} else if(stone_flag[i] == SF_REMOVED) {
++			removed++;
++		}
++	}
++	if(removed >= STONE_COUNT) {
++		return SP_CLEAR;
++	}
++	if(stones_phase == 0) {
++		if(
++			(boss_phase_frame == 50) ||
++			(boss_phase_frame == 52) ||
++			(boss_phase_frame == 54) ||
++			(boss_phase_frame == 58) ||
++			(boss_phase_frame == 60) ||
++			(boss_phase_frame == 62)
++		) {
++			stone_patnum[STONE_INNER_WEST]++;
++			stone_patnum[STONE_INNER_EAST]++;
++		} else if(boss_phase_frame == 64) {
++			stone_patnum[STONE_INNER_WEST]++;
++			stone_patnum[STONE_INNER_EAST]++;
++			boss_phase_frame = 0;
++			stone_flag[STONE_INNER_WEST] = SF_ACTIVE;
++			stone_flag[STONE_INNER_EAST] = SF_ACTIVE;
++			stones_phase = 1;
++			stones_pattern_frame = 0;
++		}
++	} else if(stones_phase == 1) {
++		stones_119CD();
++		if(stone_frames > 1300) {
++			if(stone_flag[STONE_INNER_WEST] == SF_ACTIVE) {
++				stone_flag[STONE_INNER_WEST] = SF_KILL_ANIM;
++			}
++			if(stone_flag[STONE_INNER_EAST] == SF_ACTIVE) {
++				stone_flag[STONE_INNER_EAST] = SF_KILL_ANIM;
++			}
++		}
++		if((removed >= 2) && ((boss_phase_frame % 3) == 0)) {
++			stones_120F7(STONE_OUTER_WEST);
++			if(stones_120F7(STONE_OUTER_EAST)) {
++				stones_phase = 2;
++				boss_phase_frame = 0;
++				stones_pattern_frame = 0;
++			}
++			stone_frames = 0;
++		}
++	} else if(stones_phase == 2) {
++		if(stone_frames > 1300) {
++			if(stone_flag[STONE_OUTER_WEST] == SF_ACTIVE) {
++				stone_flag[STONE_OUTER_WEST] = SF_KILL_ANIM;
++			}
++			if(stone_flag[STONE_OUTER_EAST] == SF_ACTIVE) {
++				stone_flag[STONE_OUTER_EAST] = SF_KILL_ANIM;
++			}
++		}
++		if(removed >= 4) {
++			stones_phase = 3;
++			boss_phase_frame = 0;
++			stones_pattern = 0;
++			stones_pattern_frame = 0;
++			shot_target_left = (stone_left[STONE_NORTH] + 8);
++			shot_target_top = 32;
++		} else {
++			stones_11A87(removed);
++		}
++	} else if(stones_phase == 3) {
++		if(
++			stones_122B5() &&
++			((boss_phase_frame % 3) == 0) &&
++			stones_120F7(STONE_NORTH)
++		) {
++			stones_phase = 4;
++			boss_phase_frame = 0;
++			stones_pattern_frame = 0;
++			stone_frames = 0;
++		}
++	} else if(stones_phase == 4) {
++		if(stones_pattern == 0) {
++			stones_11B5D();
++		} else if(stones_pattern == 1) {
++			stones_11BFE();
++		} else if(stones_pattern == 2) {
++			stones_11C37();
++		} else if(stones_pattern == 3) {
++			stones_11DF6();
++		} else if(stones_pattern == 4) {
++			stones_11E40();
++		} else if(stones_pattern == 5) {
++			stones_11E76();
++		}
++		if(boss_phase_frame == 0) {
++			stones_pattern++;
++			stones_pattern_frame = 0;
++			if(stones_pattern > 5) {
++				stones_phase = 5;
++				stones_pattern = 0;
++			}
++		}
++		if(stone_damage[STONE_NORTH] >= 500) {
++			stone_damage[STONE_NORTH] = 500;
++		}
++	} else if(stones_phase == 5) {
++		if(((boss_phase_frame % 3) == 0) && (stones_pattern == 0)) {
++			stones_pattern = stones_121BA();
++		}
++		if(stones_1232F()) {
++			stones_phase = 6;
++			boss_phase_frame = 0;
++			stones_pattern_frame = 0;
++			stone_frames = 0;
++			stones_pattern = 0;
++		}
++	} else if(stones_phase == 6) {
++		if(stones_pattern == 0) {
++			stones_11FB5();
++		} else if(stones_pattern == 1) {
++			stones_11F2F();
++		} else if(stones_pattern == 2) {
++			stones_11FB5();
++		} else if(stones_pattern == 3) {
++			stones_1200F();
++		}
++		if(boss_phase_frame == 0) {
++			stones_pattern++;
++			stones_pattern_frame = 0;
++			if(stones_pattern > 3) {
++				stones_phase = 7;
++			}
++		}
++	} else if(stones_phase == 7) {
++		if(
++			stones_122B5() &&
++			((boss_phase_frame % 3) == 0) &&
++			stones_120F7(STONE_NORTH)
++		) {
++			stones_phase = 8;
++			boss_phase_frame = 0;
++			stones_pattern_frame = 0;
++			stone_frames = 0;
++			stones_pattern = 0;
++		}
++	} else if(stones_phase == 8) {
++		if(stones_pattern == 0) {
++			stones_11D30();
++		} else if(stones_pattern == 1) {
++			stones_11BFE();
++		} else if(stones_pattern == 2) {
++			stones_11C8A();
++		} else if(stones_pattern == 3) {
++			stones_11DF6();
++		} else if(stones_pattern == 4) {
++			stones_11E40();
++		} else if(stones_pattern == 5) {
++			stones_11E76();
++		}
++		if(boss_phase_frame == 0) {
++			stones_pattern++;
++			stones_pattern_frame = 0;
++			if(stones_pattern > 5) {
++				stones_pattern = 1;
++			}
++			if(stone_frames > 2000) {
++				stone_flag[STONE_NORTH] = SF_KILL_ANIM;
++			}
++		}
++	}
++	return SP_BOSS;
++}
++
++void stones_end(void)
++{
++	dialog_pre();
++	dialog_script_generic_part_animate(DS_POSTBOSS);
++	stage_clear_bonus_animate();
++	overlay_stage_leave_animate();
++	stage_id++;
++}
++
++void near stones_12778(void);
++
++void stones_init(void)
++{
++	dialog_pre();
++	dialog_script_generic_part_animate(DS_PREBOSS);
++	dialog_post();
++	asm {
++		push	ds
++		push	offset aBoss2_m
++		nop
++		push	cs
++		call	near ptr sub_13ABB
++		add 	sp, 4
++	}
++	stones_12778();
++	asm { nop; push cs; call near ptr sub_129FC; }
++}
++
++void near stones_12778(void)
++{
++	register int i;
++
++	boss_phase_frame = 0;
++	for(i = 0; i < STONE_COUNT; i++) {
++		stone_flag[i] = SF_DORMANT;
++		stone_damage[i] = 0;
++		stone_patnum[i] = 148;
++		stone_unknown[i] = 0;
++	}
++	stone_left[STONE_INNER_WEST] = (PLAYFIELD_LEFT + 16 + (1 * 80));
++	stone_top[STONE_INNER_WEST] = (PLAYFIELD_TOP + 16);
++	stone_left[STONE_INNER_EAST] = (PLAYFIELD_LEFT + 16 + (3 * 80));
++	stone_top[STONE_INNER_EAST] = (PLAYFIELD_TOP + 16);
++	stone_left[STONE_OUTER_WEST] = (PLAYFIELD_LEFT + 16 + (0 * 80));
++	stone_top[STONE_OUTER_WEST] = (PLAYFIELD_TOP + 32);
++	stone_left[STONE_OUTER_EAST] = (PLAYFIELD_LEFT + 16 + (4 * 80));
++	stone_top[STONE_OUTER_EAST] = (PLAYFIELD_TOP + 32);
++	stone_left[STONE_NORTH] = (PLAYFIELD_LEFT + 16 + (2 * 80));
++	stone_top[STONE_NORTH] = (PLAYFIELD_TOP + 16);
++	stones_bullet_top = (PLAYFIELD_TOP + 24);
++	stones_bullet_left = (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - (PELLET_W / 2));
++	asm { nop; push cs; call near ptr sub_17A55; }
++	pillar_frames_new = 12;
++	stones_pattern_frame = 0;
++	stone_frames = 0;
++	stones_phase = 0;
++	stones_pattern = 0;
++	angle_1E510 = 0x20;
++	stones_y_22D9C = 96;
++	stones_y_22D9C += scroll_line;
++	if(stones_y_22D9C >= RES_Y) {
++		stones_y_22D9C -= RES_Y;
++	}
++	stones_11997();
++}
+diff --git a/th02/main/boss/explode.cpp b/th02/main/boss/explode.cpp
+index 84188f89..c1c6ff6f 100644
+--- a/th02/main/boss/explode.cpp
++++ b/th02/main/boss/explode.cpp
+@@ -30,7 +30,7 @@ extern unsigned char angle_1E510;
+ extern uint8_t stone_unknown[STONE_COUNT];
+ extern uint8_t byte_2066A;
+ extern uint8_t byte_2066B;
+-extern int word_20686;
++extern unsigned int word_20686;
+ 
+ void near playfield_side_columns_clear(void)
+ {
+diff --git a/th02/main/boss/stones.cpp b/th02/main/boss/stones.cpp
+deleted file mode 100644
+index 2b5d99e5..00000000
+--- a/th02/main/boss/stones.cpp
++++ /dev/null
+@@ -1,1047 +0,0 @@
+-/* ReC98
+- * -----
+- * Stage 3 boss: The Five Magic Stones
+- */
+-
+-#pragma option -zCDIALOG_TEXT -zPmain_03 -G
+-
+-#include "platform.h"
+-#include "x86real.h"
+-#include "pc98.h"
+-#include "libs/master.lib/master.hpp"
+-#include "libs/master.lib/pc98_gfx.hpp"
+-#include "th02/core/globals.hpp"
+-#include "th02/main/playfld.hpp"
+-#include "th02/main/scroll.hpp"
+-#include "th02/main/boss/b3.hpp"
+-#include "th02/main/boss/boss.hpp"
+-#include "th02/main/dialog/dialog.hpp"
+-#include "th02/main/hud/overlay.hpp"
+-#include "th02/main/stage/bonus.hpp"
+-#include "th02/main/stage/stage.hpp"
+-#include "th01/sprites/pellet.h"
+-#include "th02/sprites/main_pat.h"
+-#include "th02/math/randring.hpp"
+-#include "th02/snd/snd.h"
+-#include "th02/hardware/egc.hpp"
+-#include "th02/main/bullet/bullet.hpp"
+-#include "th02/main/player/player.hpp"
+-#include "th02/main/tile/tile.hpp"
+-#include "th01/rank.h"
+-#include "th02/v_colors.hpp"
+-#include "th02/main/score.hpp"
+-#include "th02/main/spark.hpp"
+-#include "th02/main/item/item.hpp"
+-
+-static const pixel_t STONE_W = 32;
+-
+-extern screen_x_t stone_left[STONE_COUNT];
+-extern screen_y_t stone_top[STONE_COUNT];
+-extern int stone_patnum[STONE_COUNT];
+-extern uint8_t stone_unknown[STONE_COUNT];
+-
+-extern long stone_frames;
+-extern uint8_t stones_phase;
+-extern uint8_t stones_pattern;
+-extern int stones_pattern_frame;
+-extern screen_x_t stones_bullet_left;
+-extern screen_y_t stones_bullet_top;
+-extern vram_y_t stones_y_22D9C;
+-extern unsigned char angle_1E510;
+-extern uint8_t pillar_frames_new;
+-extern screen_x_t shot_target_left;
+-extern screen_y_t shot_target_top;
+-extern const char aBoss2_m[];
+-
+-void near dialog_pre(void);
+-void near dialog_post(void);
+-
+-void sub_129FC(void);
+-void sub_13ABB(char far *fn);
+-void sub_17A55(void);
+-
+-extern uint8_t byte_2066F;
+-extern uint8_t group_20670;
+-extern uint8_t byte_20671;
+-extern unsigned char angle_22FAF;
+-extern unsigned char angle_22FB0;
+-extern unsigned char angle_22FB1[STONE_COUNT];
+-extern uint8_t stones_ring_tile_flag[TILES_X];
+-extern uint8_t stones_ring_phase;
+-extern uint8_t stones_ring_i;
+-extern uint8_t stones_ring_done;
+-extern int stones_ring_tile_1;
+-extern int stones_ring_tile_2;
+-extern int stones_ring_tile_3;
+-extern const uint8_t STONES_RING_ORDER_LEFT[TILES_X / 2];
+-extern const uint8_t STONES_RING_ORDER_RIGHT[TILES_X / 2];
+-
+-void pascal near pillar_add(
+-	screen_x_t left, screen_y_t top, int duration, int patnum
+-);
+-
+-extern int stone_kill_frame[STONE_COUNT];
+-extern uint8_t byte_2066E;
+-extern unsigned char angle_1EB28;
+-extern screen_x_t stones_pillar_left;
+-extern uint8_t stones_pillar_state;
+-extern unsigned char player_invincibility_time;
+-
+-int pascal near shots_hittest(
+-	screen_x_t left, screen_y_t top, pixel_t w, pixel_t h
+-);
+-void pascal near sub_FFF8(screen_x_t center_x, screen_y_t center_y, int frame);
+-void pascal items_add(screen_x_t left, screen_y_t top, int type);
+-
+-void stones_bg_render(void)
+-{
+-	register int i;
+-
+-	for(i = 0; i < STONE_COUNT; i++) {
+-		if(stone_flag[i] < SF_REMOVED) {
+-			tiles_invalidate_rect(stone_left[i], stone_top[i], STONE_W, STONE_W);
+-			if(stone_flag[i] == SF_REMOVE) {
+-				stone_flag[i] = SF_REMOVED;
+-			}
+-		}
+-	}
+-}
+-
+-void near stones_116EC(void)
+-{
+-	register int i;
+-	register vram_y_t vram_top;
+-
+-	for(i = 0; i < STONE_COUNT; i++) {
+-		if(stone_flag[i] < SF_KILL_ANIM) {
+-			vram_top = stone_top[i];
+-			vram_top += scroll_line;
+-			if(vram_top >= RES_Y) {
+-				vram_top -= RES_Y;
+-			}
+-			if(stone_unknown[i]) {
+-				snd_se_play(4);
+-				super_roll_put_1plane(
+-					stone_left[i],
+-					vram_top,
+-					stone_patnum[i],
+-					0,
+-					super_plane(V_WHITE)
+-				);
+-				stone_unknown[i] = 0;
+-			} else {
+-				super_roll_put(stone_left[i], vram_top, stone_patnum[i]);
+-			}
+-		}
+-	}
+-}
+-
+-int pascal near stones_11766(int stone)
+-{
+-	int patnum;
+-	int frames;
+-	vram_y_t vram_top;
+-
+-	frames = 64;
+-	sparks_add(
+-		(stone_left[stone] + 16), (stone_top[stone] + 12), (5 << 4), 2, false
+-	);
+-	patnum = 10;
+-	vram_top = stone_top[stone];
+-	vram_top += scroll_line;
+-	if(vram_top >= RES_Y) {
+-		vram_top -= RES_Y;
+-	}
+-	if(stone == STONE_NORTH) {
+-		frames += 32;
+-		sub_FFF8(
+-			(stone_left[STONE_NORTH] + 8),
+-			(stone_top[STONE_NORTH] + 8),
+-			stone_kill_frame[STONE_NORTH]
+-		);
+-		if(stone_kill_frame[STONE_NORTH] >= 24) {
+-			sub_FFF8(
+-				(stone_left[STONE_NORTH] + 8),
+-				(stone_top[STONE_NORTH] + 8),
+-				(stone_kill_frame[STONE_NORTH] - 24)
+-			);
+-		}
+-		if(stone_kill_frame[STONE_NORTH] < 32) {
+-			super_roll_put(
+-				stone_left[STONE_NORTH], vram_top, stone_patnum[STONE_NORTH]
+-			);
+-			stone_kill_frame[STONE_NORTH]++;
+-			return 0;
+-		}
+-		if(stone_kill_frame[STONE_NORTH] == 56) {
+-			angle_1E510 = -0x20;
+-		}
+-		patnum += ((stone_kill_frame[STONE_NORTH] - 32) / 8);
+-	} else {
+-		patnum += (stone_kill_frame[stone] / 8);
+-	}
+-	stone_kill_frame[stone]++;
+-	if(stone_kill_frame[stone] >= frames) {
+-		stone_kill_frame[stone] = 0;
+-		stone_flag[stone] = SF_REMOVE;
+-		return 1;
+-	}
+-	super_put(stone_left[stone], vram_top, patnum);
+-	return 0;
+-}
+-
+-void near stones_11877(void)
+-{
+-	register int i;
+-	register int damage;
+-
+-	stones_pattern_frame++;
+-	for(i = 0; i < STONE_COUNT; i++) {
+-		if(stone_flag[i] > SF_ACTIVE) {
+-			continue;
+-		}
+-		if(
+-			!(damage = shots_hittest(stone_left[i], stone_top[i], STONE_W, 40))
+-			|| (stone_flag[i] != SF_ACTIVE)
+-		) {
+-			continue;
+-		}
+-		stone_unknown[i] = 1;
+-		stone_damage[i] += damage;
+-		if(
+-			(
+-				(i == STONE_NORTH) ? 930 : (i <= STONE_INNER_EAST) ? 140 : 120
+-			) <= stone_damage[i]
+-		) {
+-			stone_flag[i] = SF_KILL_ANIM;
+-			score_delta += 30000;
+-			if(i <= STONE_OUTER_EAST) {
+-				items_add(
+-					(stone_left[i] + 8),
+-					(stone_top[i] + 12),
+-					((i == 0) ? static_cast<int>(IT_BOMB) : (i <= 2) ? static_cast<int>(IT_BIGPOWER) : IT_BOMB)
+-				);
+-				snd_se_play(2);
+-			} else {
+-				player_invincibility_time = BOSS_DEFEAT_INVINCIBILITY_FRAMES;
+-			}
+-		}
+-	}
+-	for(i = 0; i < STONE_COUNT; i++) {
+-		if(stone_flag[i] == SF_ACTIVE) {
+-			shot_target_left = (stone_left[i] + 8);
+-			shot_target_top = (stone_top[i] + 8);
+-			break;
+-		}
+-	}
+-	if(player_topleft.y < (PLAYFIELD_TOP + 80)) {
+-		bullets_add_pellet(
+-			stones_bullet_left,
+-			stones_bullet_top,
+-			(randring2_next8_and(0x0F) - 7),
+-			BG_1_AIMED,
+-			((4 << 4) + 13)
+-		);
+-	}
+-}
+-
+-void near stones_11997(void)
+-{
+-	if(rank != RANK_EASY) {
+-		byte_2066E = BG_5_SPREAD_WIDE_AIMED;
+-		byte_2066F = 0;
+-		group_20670 = BG_8_RING;
+-		byte_20671 = BG_4_RING;
+-	} else {
+-		byte_2066E = BG_3_SPREAD_WIDE_AIMED;
+-		byte_2066F = 2;
+-		group_20670 = BG_4_RING;
+-		byte_20671 = BG_2_RING;
+-	}
+-}
+-
+-void near stones_119CD(void)
+-{
+-	register int i;
+-
+-	if(boss_phase_frame < 30) {
+-		return;
+-	}
+-	if(boss_phase_frame < 180) {
+-		if((boss_phase_frame % 24) == 0) {
+-			for(i = 0; i < 2; i++) {
+-				if(stone_flag[i] == SF_ACTIVE) {
+-					bullets_add_pellet(
+-						(stone_left[i] + 12),
+-						(stone_top[i] + 8),
+-						0x00,
+-						byte_2066E,
+-						((2 << 4) + 6)
+-					);
+-				}
+-			}
+-		}
+-	} else if(boss_phase_frame >= 200) {
+-		if(boss_phase_frame < 310) {
+-			if((boss_phase_frame & 0xF) == 0) {
+-				for(i = 0; i < STONE_OUTER_WEST; i++) {
+-					if(stone_flag[i] == SF_ACTIVE) {
+-						bullets_add_16x16(
+-							(stone_left[i] + 12),
+-							(stone_top[i] + 8),
+-							0x00,
+-							BG_1_AIMED,
+-							PAT_BULLET16_OUTLINED_BALL_RED,
+-							(5 << 4)
+-						);
+-					}
+-				}
+-			}
+-		} else if(boss_phase_frame > 350) {
+-			boss_phase_frame = 0;
+-		}
+-	}
+-}
+-
+-#define stones_outer_spread(i, stone) { \
+-	for(stone = STONE_OUTER_WEST; stone < STONE_NORTH; stone++) { \
+-		if(stone_flag[stone] == SF_ACTIVE) { \
+-			for(i = 0; i < 6; i++) { \
+-				bullets_add_16x16( \
+-					(stone_left[stone] + 12), \
+-					(stone_top[stone] + 8), \
+-					(i * 0x2A), \
+-					BSM_DECELERATE_THEN_TURN_AIMED, \
+-					PAT_BULLET16_OUTLINED_BALL_GREEN, \
+-					((3 << 4) + 8) \
+-				); \
+-			} \
+-		} \
+-	} \
+-}
+-
+-void pascal near stones_11A87(int stones_removed)
+-{
+-	register int i;
+-	register int stone;
+-
+-	if(boss_phase_frame < 30) {
+-		return;
+-	}
+-	if(boss_phase_frame < 200) {
+-		if((boss_phase_frame % (110 - (stones_removed * 20))) == 0) {
+-			stones_outer_spread(i, stone);
+-		}
+-	} else {
+-		if((boss_phase_frame % (90 - (stones_removed * 20))) == 0) {
+-			stones_outer_spread(i, stone);
+-		}
+-	}
+-}
+-
+-void near stones_11B5D(void)
+-{
+-	if(boss_phase_frame < 50) {
+-		return;
+-	}
+-	if(boss_phase_frame == 50) {
+-		pillar_frames_new = 36;
+-		pillar_add(48, 96, 16, 0x67);
+-		pillar_add(192, 96, 16, 0x67);
+-		pillar_add(240, 96, 16, 0x67);
+-		pillar_add(384, 96, 16, 0x67);
+-	} else if(boss_phase_frame == 80) {
+-		pillar_add(80, 96, 16, 0x67);
+-		pillar_add(160, 96, 16, 0x67);
+-		pillar_add(272, 96, 16, 0x67);
+-		pillar_add(352, 96, 16, 0x67);
+-		boss_phase_frame = 0;
+-	}
+-}
+-
+-void near stones_11BFE(void)
+-{
+-	if((boss_phase_frame & 3) == 0) {
+-		bullets_add_pellet(
+-			stones_bullet_left,
+-			stones_bullet_top,
+-			angle_1EB28,
+-			BG_2_SPREAD_HORIZONTALLY_SYMMETRIC,
+-			((4 << 4) + 6)
+-		);
+-		angle_1EB28 += 8;
+-		if(angle_1EB28 > 0x82) {
+-			boss_phase_frame = 0;
+-			angle_1EB28 = 0;
+-		}
+-	}
+-}
+-
+-void near stones_11C37(void)
+-{
+-	screen_x_t left;
+-
+-	if(boss_phase_frame < 24) {
+-		return;
+-	}
+-	if((boss_phase_frame % (28 - (rank * 3))) == 0) {
+-		pillar_frames_new = 30;
+-		left = ((player_topleft.x + (PLAYER_W / 2)) & 0xFFF0);
+-		pillar_add(left, 96, 16, 0x67);
+-	}
+-	if(boss_phase_frame >= 140) {
+-		boss_phase_frame = 0;
+-	}
+-}
+-
+-void near stones_11C8A(void)
+-{
+-	unsigned char angle_1;
+-	unsigned char angle_2;
+-
+-	if(boss_phase_frame < 40) {
+-		if((boss_phase_frame % 6) == 0) {
+-			angle_1 = iatan2(
+-				(player_topleft.y - 32),
+-				(player_topleft.x - stone_left[STONE_NORTH])
+-			);
+-			angle_2 = (randring2_next8_and(0x1F) + 0x10);
+-			bullets_add_pellet(
+-				stones_bullet_left,
+-				stones_bullet_top,
+-				(angle_1 + angle_2),
+-				BG_1,
+-				(5 << 4)
+-			);
+-			bullets_add_pellet(
+-				stones_bullet_left,
+-				stones_bullet_top,
+-				(angle_1 - angle_2),
+-				BG_1,
+-				(5 << 4)
+-			);
+-		}
+-	} else if(boss_phase_frame < 102) {
+-		if((boss_phase_frame % 6) == 0) {
+-			angle_1 = iatan2(
+-				(player_topleft.y - 32),
+-				(player_topleft.x - stone_left[STONE_NORTH])
+-			);
+-			angle_2 = (0x5F - boss_phase_frame);
+-			bullets_add_pellet(
+-				stones_bullet_left,
+-				stones_bullet_top,
+-				(angle_1 + angle_2),
+-				BG_1,
+-				(5 << 4)
+-			);
+-			bullets_add_pellet(
+-				stones_bullet_left,
+-				stones_bullet_top,
+-				(angle_1 - angle_2),
+-				BG_1,
+-				(5 << 4)
+-			);
+-		}
+-	} else {
+-		boss_phase_frame = 0;
+-	}
+-}
+-
+-void near stones_11D30(void)
+-{
+-	if(boss_phase_frame < 16) {
+-		return;
+-	}
+-	if(boss_phase_frame == 16) {
+-		stones_pillar_left = 32;
+-		stones_pillar_state = 0;
+-	}
+-	if((stones_pillar_state == 0) && ((boss_phase_frame & 7) == 0)) {
+-		pillar_frames_new = 16;
+-		pillar_add(stones_pillar_left, 96, 3, 0x6F);
+-		pillar_add((432 - stones_pillar_left), 96, 3, 0x6F);
+-		stones_pillar_left += 16;
+-		if(stones_pillar_left > 176) {
+-			stones_pillar_state = 1;
+-			stones_pillar_left += 16;
+-		}
+-	}
+-	if(stones_pillar_state > 36) {
+-		if((boss_phase_frame & 7) == 0) {
+-			pillar_add(stones_pillar_left, 96, 1, 0x6F);
+-			pillar_add((432 - stones_pillar_left), 96, 1, 0x6F);
+-			stones_pillar_left -= 16;
+-			if(stones_pillar_left < 64) {
+-				stones_pillar_state = 0;
+-				boss_phase_frame = 0;
+-				stones_pillar_left = 32;
+-			}
+-		}
+-	} else if(stones_pillar_state != 0) {
+-		stones_pillar_state++;
+-	}
+-}
+-
+-void near stones_11DF6(void)
+-{
+-	register int i;
+-
+-	if((boss_phase_frame & 0xF) == 0) {
+-		for(i = byte_2066F; i < STONE_NORTH; i++) {
+-			bullets_add_16x16(
+-				stone_left[i],
+-				stone_top[i],
+-				randring2_next8(),
+-				BSM_GRAVITY,
+-				PAT_BULLET16_OUTLINED_BALL_GREEN,
+-				(2 << 4)
+-			);
+-		}
+-	}
+-	if(boss_phase_frame > 110) {
+-		boss_phase_frame = 0;
+-	}
+-}
+-
+-void near stones_11E40(void)
+-{
+-	if((boss_phase_frame & 3) == 0) {
+-		bullets_add_pellet(
+-			stones_bullet_left,
+-			stones_bullet_top,
+-			randring2_next8(),
+-			byte_20671,
+-			((boss_phase_frame >> 1) + ((1 << 4) + 14))
+-		);
+-	}
+-	if(boss_phase_frame > 130) {
+-		boss_phase_frame = 0;
+-	}
+-}
+-
+-void near stones_11E76(void)
+-{
+-	register int i;
+-	register int column;
+-
+-	if(boss_phase_frame < 16) {
+-		return;
+-	}
+-	if(boss_phase_frame < 80) {
+-		if((boss_phase_frame % 36) == 0) {
+-			pillar_frames_new = 30;
+-			column = ((randring2_next8() % 24) + 2);
+-			pillar_add((column * 16), 96, 12, 0x6F);
+-		}
+-		if(((boss_phase_frame % 40) == 0) && (rank != RANK_EASY)) {
+-			bullets_add_pellet(
+-				stones_bullet_left,
+-				stones_bullet_top,
+-				0x00,
+-				BG_1_AIMED,
+-				((4 << 4) + 6)
+-			);
+-		}
+-	} else if(boss_phase_frame < 120) {
+-		if(boss_phase_frame == 100) {
+-			pillar_frames_new = 30;
+-			for(i = 0; i < 3; i++) {
+-				column = ((randring2_next8() % 24) + 2);
+-				pillar_add((column * 16), 96, 12, 0x6F);
+-			}
+-		}
+-	} else {
+-		boss_phase_frame = 0;
+-	}
+-}
+-
+-void near stones_11F2F(void)
+-{
+-	register int i;
+-
+-	if(boss_phase_frame < 16) {
+-		return;
+-	}
+-	if(boss_phase_frame == 16) {
+-		angle_22FAF = 0x29;
+-	}
+-	if((boss_phase_frame % 30) == 0) {
+-		for(i = 0; i < STONE_NORTH; i++) {
+-			bullets_add_16x16(
+-				stone_left[i],
+-				stone_top[i],
+-				angle_22FAF,
+-				BG_1_AIMED,
+-				PAT_BULLET16_OUTLINED_BALL_GREEN,
+-				((3 << 4) + 12)
+-			);
+-			bullets_add_16x16(
+-				stone_left[i],
+-				stone_top[i],
+-				-angle_22FAF,
+-				BG_1_AIMED,
+-				PAT_BULLET16_OUTLINED_BALL_GREEN,
+-				((3 << 4) + 12)
+-			);
+-		}
+-		angle_22FAF -= 3;
+-	}
+-	if(angle_22FAF >= 0xC8) {
+-		boss_phase_frame = 0;
+-	}
+-}
+-
+-void near stones_11FB5(void)
+-{
+-	if(boss_phase_frame == 2) {
+-		angle_22FB0 = 0x3E;
+-	}
+-	if((boss_phase_frame & 7) == 0) {
+-		bullets_add_pellet(
+-			stones_bullet_left,
+-			stones_bullet_top,
+-			(0x00 - angle_22FB0),
+-			group_20670,
+-			(4 << 4)
+-		);
+-		bullets_add_pellet(
+-			stones_bullet_left,
+-			stones_bullet_top,
+-			angle_22FB0,
+-			group_20670,
+-			(4 << 4)
+-		);
+-		angle_22FB0 -= 3;
+-		if(angle_22FB0 > 0xC8) {
+-			boss_phase_frame = 0;
+-		}
+-	}
+-}
+-
+-void near stones_1200F(void)
+-{
+-	register int i;
+-
+-	if(boss_phase_frame < 60) {
+-		return;
+-	}
+-	if((boss_phase_frame % 64) == 0) {
+-		for(i = 0; i < STONE_COUNT; i++) {
+-			angle_22FB1[i] = iatan2(
+-				(player_topleft.y - 32), (player_topleft.x - stone_left[i])
+-			);
+-		}
+-	}
+-	if((boss_phase_frame & 3) == 0) {
+-		if(boss_phase_frame < 384) {
+-			if(((boss_phase_frame % 64) >> 2) <= 8) {
+-				for(i = 0; i < STONE_COUNT; i++) {
+-					bullets_add_pellet(
+-						(stone_left[i] + 12),
+-						(stone_top[i] + 12),
+-						angle_22FB1[i],
+-						BG_1,
+-						(7 << 4)
+-					);
+-				}
+-				snd_se_play(3);
+-			}
+-		} else {
+-			bullets_set_stack_multiplier(0);
+-			for(i = 0; i < STONE_COUNT; i++) {
+-				bullets_add_16x16(
+-					(stone_left[i] + 8),
+-					(stone_top[i] + 8),
+-					angle_22FB1[STONE_NORTH],
+-					BG_4_RING,
+-					PAT_BULLET16_BALL,
+-					(7 << 4)
+-				);
+-			}
+-			snd_se_play(3);
+-		}
+-	}
+-	if(boss_phase_frame >= 447) {
+-		boss_phase_frame = 0;
+-		bullets_set_stack_multiplier(1);
+-	}
+-}
+-
+-int pascal near stones_120F7(int stone)
+-{
+-	if((stone == STONE_INNER_WEST) || (stone == STONE_INNER_EAST)) {
+-		stone_patnum[stone]++;
+-		if(stone_patnum[stone] >= 155) {
+-			stone_flag[stone] = SF_ACTIVE;
+-			return 1;
+-		}
+-	} else if((stone == STONE_OUTER_WEST) || (stone == STONE_OUTER_EAST)) {
+-		if(stone_patnum[stone] < 152) {
+-			stone_patnum[stone]++;
+-		}
+-		if(stone_patnum[stone] == 152) {
+-			stone_patnum[stone] = 156;
+-		} else {
+-			stone_patnum[stone]++;
+-		}
+-		if(stone_patnum[stone] >= 159) {
+-			stone_flag[stone] = SF_ACTIVE;
+-			return 1;
+-		}
+-	} else if(stone == STONE_NORTH) {
+-		if(stone_patnum[STONE_NORTH] < 152) {
+-			stone_patnum[STONE_NORTH]++;
+-		}
+-		if(stone_patnum[STONE_NORTH] == 152) {
+-			stone_patnum[STONE_NORTH] = 160;
+-		} else {
+-			stone_patnum[STONE_NORTH]++;
+-		}
+-		if(stone_patnum[STONE_NORTH] >= 163) {
+-			stone_flag[STONE_NORTH] = SF_ACTIVE;
+-			return 1;
+-		}
+-	}
+-	return 0;
+-}
+-
+-int near stones_121BA(void)
+-{
+-	if(stone_patnum[STONE_NORTH] >= 160) {
+-		stone_patnum[STONE_NORTH]--;
+-	}
+-	if(stone_patnum[STONE_NORTH] == 159) {
+-		stone_flag[STONE_NORTH] = SF_DORMANT;
+-		stone_patnum[STONE_NORTH] = 151;
+-	} else {
+-		stone_patnum[STONE_NORTH]--;
+-	}
+-	if(stone_patnum[STONE_NORTH] <= 148) {
+-		return 1;
+-	}
+-	return 0;
+-}
+-
+-void pascal near stones_ring_step(uint8_t flag)
+-{
+-	if(boss_phase_frame & 1) {
+-		stones_ring_tile_flag[STONES_RING_ORDER_LEFT[stones_ring_i]] = flag;
+-		stones_ring_tile_flag[STONES_RING_ORDER_RIGHT[stones_ring_i]] = flag;
+-		stones_ring_i++;
+-		if(stones_ring_i >= (TILES_X / 2)) {
+-			stones_ring_phase++;
+-			stones_ring_i = 0;
+-		}
+-	}
+-}
+-
+-void near stones_ring_put(void)
+-{
+-	screen_x_t left;
+-	register uint8_t near *p = stones_ring_tile_flag;
+-	register int i;
+-
+-	egc_start_copy_noframe();
+-	for((i = 0, left = PLAYFIELD_LEFT); i < TILES_X; (i++, left += TILE_W, p++)) {
+-		if(*p == 1) {
+-			tile_ring_set_and_put_both_8(left, stones_y_22D9C, stones_ring_tile_1);
+-			*p = 0;
+-		} else if(*p == 2) {
+-			tile_ring_set_and_put_both_8(left, stones_y_22D9C, stones_ring_tile_2);
+-			*p = 0;
+-		} else if(stones_ring_tile_flag[i] == 3) {
+-			tile_ring_set_and_put_both_8(left, stones_y_22D9C, stones_ring_tile_3);
+-			*p = 0;
+-			stones_ring_done++;
+-		}
+-	}
+-	egc_off();
+-}
+-
+-#define stones_ring_animate(tile_1, tile_2, tile_3) { \
+-	if(boss_phase_frame < 49) { \
+-		return 0; \
+-	} \
+-	if(boss_phase_frame == 49) { \
+-		for(i = 0; i < TILES_X; i++) { \
+-			stones_ring_tile_flag[i] = 0; \
+-		} \
+-		stones_ring_i = 0; \
+-		stones_ring_phase = 0; \
+-		stones_ring_done = 0; \
+-		stones_ring_tile_1 = tile_1; \
+-		stones_ring_tile_2 = tile_2; \
+-		stones_ring_tile_3 = tile_3; \
+-	} else if(stones_ring_phase == 0) { \
+-		stones_ring_step(1); \
+-	} else if(stones_ring_phase == 1) { \
+-		stones_ring_step(2); \
+-	} else if(stones_ring_phase == 2) { \
+-		stones_ring_step(3); \
+-	} \
+-	stones_ring_put(); \
+-	if(stones_ring_done >= TILES_X) { \
+-		return 1; \
+-	} \
+-	return 0; \
+-}
+-
+-int near stones_122B5(void)
+-{
+-	register int i;
+-	stones_ring_animate(41, 42, 43);
+-}
+-
+-int near stones_1232F(void)
+-{
+-	register int i;
+-	stones_ring_animate(42, 41, 40);
+-}
+-
+-int stones_update(void)
+-{
+-	register int i;
+-	register int removed = 0;
+-
+-	boss_phase_frame++;
+-	stone_frames++;
+-	stones_11877();
+-	stones_116EC();
+-	for(i = 0; i < STONE_COUNT; i++) {
+-		if(stone_flag[i] == SF_KILL_ANIM) {
+-			stones_11766(i);
+-		} else if(stone_flag[i] == SF_REMOVED) {
+-			removed++;
+-		}
+-	}
+-	if(removed >= STONE_COUNT) {
+-		return SP_CLEAR;
+-	}
+-	if(stones_phase == 0) {
+-		if(
+-			(boss_phase_frame == 50) ||
+-			(boss_phase_frame == 52) ||
+-			(boss_phase_frame == 54) ||
+-			(boss_phase_frame == 58) ||
+-			(boss_phase_frame == 60) ||
+-			(boss_phase_frame == 62)
+-		) {
+-			stone_patnum[STONE_INNER_WEST]++;
+-			stone_patnum[STONE_INNER_EAST]++;
+-		} else if(boss_phase_frame == 64) {
+-			stone_patnum[STONE_INNER_WEST]++;
+-			stone_patnum[STONE_INNER_EAST]++;
+-			boss_phase_frame = 0;
+-			stone_flag[STONE_INNER_WEST] = SF_ACTIVE;
+-			stone_flag[STONE_INNER_EAST] = SF_ACTIVE;
+-			stones_phase = 1;
+-			stones_pattern_frame = 0;
+-		}
+-	} else if(stones_phase == 1) {
+-		stones_119CD();
+-		if(stone_frames > 1300) {
+-			if(stone_flag[STONE_INNER_WEST] == SF_ACTIVE) {
+-				stone_flag[STONE_INNER_WEST] = SF_KILL_ANIM;
+-			}
+-			if(stone_flag[STONE_INNER_EAST] == SF_ACTIVE) {
+-				stone_flag[STONE_INNER_EAST] = SF_KILL_ANIM;
+-			}
+-		}
+-		if((removed >= 2) && ((boss_phase_frame % 3) == 0)) {
+-			stones_120F7(STONE_OUTER_WEST);
+-			if(stones_120F7(STONE_OUTER_EAST)) {
+-				stones_phase = 2;
+-				boss_phase_frame = 0;
+-				stones_pattern_frame = 0;
+-			}
+-			stone_frames = 0;
+-		}
+-	} else if(stones_phase == 2) {
+-		if(stone_frames > 1300) {
+-			if(stone_flag[STONE_OUTER_WEST] == SF_ACTIVE) {
+-				stone_flag[STONE_OUTER_WEST] = SF_KILL_ANIM;
+-			}
+-			if(stone_flag[STONE_OUTER_EAST] == SF_ACTIVE) {
+-				stone_flag[STONE_OUTER_EAST] = SF_KILL_ANIM;
+-			}
+-		}
+-		if(removed >= 4) {
+-			stones_phase = 3;
+-			boss_phase_frame = 0;
+-			stones_pattern = 0;
+-			stones_pattern_frame = 0;
+-			shot_target_left = (stone_left[STONE_NORTH] + 8);
+-			shot_target_top = 32;
+-		} else {
+-			stones_11A87(removed);
+-		}
+-	} else if(stones_phase == 3) {
+-		if(
+-			stones_122B5() &&
+-			((boss_phase_frame % 3) == 0) &&
+-			stones_120F7(STONE_NORTH)
+-		) {
+-			stones_phase = 4;
+-			boss_phase_frame = 0;
+-			stones_pattern_frame = 0;
+-			stone_frames = 0;
+-		}
+-	} else if(stones_phase == 4) {
+-		if(stones_pattern == 0) {
+-			stones_11B5D();
+-		} else if(stones_pattern == 1) {
+-			stones_11BFE();
+-		} else if(stones_pattern == 2) {
+-			stones_11C37();
+-		} else if(stones_pattern == 3) {
+-			stones_11DF6();
+-		} else if(stones_pattern == 4) {
+-			stones_11E40();
+-		} else if(stones_pattern == 5) {
+-			stones_11E76();
+-		}
+-		if(boss_phase_frame == 0) {
+-			stones_pattern++;
+-			stones_pattern_frame = 0;
+-			if(stones_pattern > 5) {
+-				stones_phase = 5;
+-				stones_pattern = 0;
+-			}
+-		}
+-		if(stone_damage[STONE_NORTH] >= 500) {
+-			stone_damage[STONE_NORTH] = 500;
+-		}
+-	} else if(stones_phase == 5) {
+-		if(((boss_phase_frame % 3) == 0) && (stones_pattern == 0)) {
+-			stones_pattern = stones_121BA();
+-		}
+-		if(stones_1232F()) {
+-			stones_phase = 6;
+-			boss_phase_frame = 0;
+-			stones_pattern_frame = 0;
+-			stone_frames = 0;
+-			stones_pattern = 0;
+-		}
+-	} else if(stones_phase == 6) {
+-		if(stones_pattern == 0) {
+-			stones_11FB5();
+-		} else if(stones_pattern == 1) {
+-			stones_11F2F();
+-		} else if(stones_pattern == 2) {
+-			stones_11FB5();
+-		} else if(stones_pattern == 3) {
+-			stones_1200F();
+-		}
+-		if(boss_phase_frame == 0) {
+-			stones_pattern++;
+-			stones_pattern_frame = 0;
+-			if(stones_pattern > 3) {
+-				stones_phase = 7;
+-			}
+-		}
+-	} else if(stones_phase == 7) {
+-		if(
+-			stones_122B5() &&
+-			((boss_phase_frame % 3) == 0) &&
+-			stones_120F7(STONE_NORTH)
+-		) {
+-			stones_phase = 8;
+-			boss_phase_frame = 0;
+-			stones_pattern_frame = 0;
+-			stone_frames = 0;
+-			stones_pattern = 0;
+-		}
+-	} else if(stones_phase == 8) {
+-		if(stones_pattern == 0) {
+-			stones_11D30();
+-		} else if(stones_pattern == 1) {
+-			stones_11BFE();
+-		} else if(stones_pattern == 2) {
+-			stones_11C8A();
+-		} else if(stones_pattern == 3) {
+-			stones_11DF6();
+-		} else if(stones_pattern == 4) {
+-			stones_11E40();
+-		} else if(stones_pattern == 5) {
+-			stones_11E76();
+-		}
+-		if(boss_phase_frame == 0) {
+-			stones_pattern++;
+-			stones_pattern_frame = 0;
+-			if(stones_pattern > 5) {
+-				stones_pattern = 1;
+-			}
+-			if(stone_frames > 2000) {
+-				stone_flag[STONE_NORTH] = SF_KILL_ANIM;
+-			}
+-		}
+-	}
+-	return SP_BOSS;
+-}
+-
+-void stones_end(void)
+-{
+-	dialog_pre();
+-	dialog_script_generic_part_animate(DS_POSTBOSS);
+-	stage_clear_bonus_animate();
+-	overlay_stage_leave_animate();
+-	stage_id++;
+-}
+-
+-void near stones_12778(void);
+-
+-void stones_init(void)
+-{
+-	dialog_pre();
+-	dialog_script_generic_part_animate(DS_PREBOSS);
+-	dialog_post();
+-	asm {
+-		push	ds
+-		push	offset aBoss2_m
+-		nop
+-		push	cs
+-		call	near ptr sub_13ABB
+-		add 	sp, 4
+-	}
+-	stones_12778();
+-	asm { nop; push cs; call near ptr sub_129FC; }
+-}
+-
+-void near stones_12778(void)
+-{
+-	register int i;
+-
+-	boss_phase_frame = 0;
+-	for(i = 0; i < STONE_COUNT; i++) {
+-		stone_flag[i] = SF_DORMANT;
+-		stone_damage[i] = 0;
+-		stone_patnum[i] = 148;
+-		stone_unknown[i] = 0;
+-	}
+-	stone_left[STONE_INNER_WEST] = (PLAYFIELD_LEFT + 16 + (1 * 80));
+-	stone_top[STONE_INNER_WEST] = (PLAYFIELD_TOP + 16);
+-	stone_left[STONE_INNER_EAST] = (PLAYFIELD_LEFT + 16 + (3 * 80));
+-	stone_top[STONE_INNER_EAST] = (PLAYFIELD_TOP + 16);
+-	stone_left[STONE_OUTER_WEST] = (PLAYFIELD_LEFT + 16 + (0 * 80));
+-	stone_top[STONE_OUTER_WEST] = (PLAYFIELD_TOP + 32);
+-	stone_left[STONE_OUTER_EAST] = (PLAYFIELD_LEFT + 16 + (4 * 80));
+-	stone_top[STONE_OUTER_EAST] = (PLAYFIELD_TOP + 32);
+-	stone_left[STONE_NORTH] = (PLAYFIELD_LEFT + 16 + (2 * 80));
+-	stone_top[STONE_NORTH] = (PLAYFIELD_TOP + 16);
+-	stones_bullet_top = (PLAYFIELD_TOP + 24);
+-	stones_bullet_left = (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - (PELLET_W / 2));
+-	asm { nop; push cs; call near ptr sub_17A55; }
+-	pillar_frames_new = 12;
+-	stones_pattern_frame = 0;
+-	stone_frames = 0;
+-	stones_phase = 0;
+-	stones_pattern = 0;
+-	angle_1E510 = 0x20;
+-	stones_y_22D9C = 96;
+-	stones_y_22D9C += scroll_line;
+-	if(stones_y_22D9C >= RES_Y) {
+-		stones_y_22D9C -= RES_Y;
+-	}
+-	stones_11997();
+-}
+diff --git a/th02/main/midboss/m3.cpp b/th02/main/midboss/m3.cpp
+index e76dfe13..6061bdb2 100644
+--- a/th02/main/midboss/m3.cpp
++++ b/th02/main/midboss/m3.cpp
+@@ -1,7 +1,98 @@
+-/// Stage 3 midboss
+-/// ---------------
++/// Stage 3 background effect and midboss
++/// --------------------------------------
+ 
+-#include "th02/main/boss/b3.hpp"
++extern "C" void MASTER_RET graph_scroll(
++	unsigned line1, unsigned adr1, unsigned adr2
++);
++
++extern unsigned int word_20686;
++extern pixel_t stage3_bg_radius;
++extern screen_x_t stage3_bg_center_x;
++extern screen_y_t stage3_bg_center_y;
++extern unsigned char stage3_bg_angle;
++extern screen_point_t stage3_bg_dots[PAGE_COUNT][64];
++
++void sub_10E4F(void)
++{
++	register int i;
++	for(i = 0; i < 64; i++) {
++		tiles_invalidate_rect(
++			stage3_bg_dots[page_back][i].x, stage3_bg_dots[page_back][i].y, 1, 2
++		);
++	}
++}
++
++void sub_10E95(void)
++{
++	screen_x_t left;
++	unsigned char angle;
++	register screen_y_t top;
++	register int i;
++
++	word_20686++;
++	if(word_20686 < 168) {
++		return;
++	}
++	if(word_20686 == 168) {
++		snd_se_play(14);
++	} else if(word_20686 < 200) {
++		if(word_20686 <= 180) {
++			PaletteTone = (((word_20686 & 1) * 70) + 100);
++			palette_show();
++		}
++		i = (word_20686 & 1);
++		graph_scroll((RES_Y - scroll_line), ((scroll_line * 40) + i), i);
++		slowdown_factor = 3;
++		stage3_bg_center_x = 224;
++		stage3_bg_center_y = 200;
++		stage3_bg_radius = 0;
++		stage3_bg_angle = 0;
++	} else if(word_20686 < 400) {
++		if(word_20686 == 200) {
++			slowdown_factor = 1;
++		}
++		Palettes[0].c.r = (200 - (word_20686 >> 1));
++		Palettes[0].c.g = 0;
++		Palettes[0].c.b = 0;
++		stage3_bg_radius = (word_20686 - 200);
++		stage3_bg_angle++;
++	} else if(word_20686 < 600) {
++		Palettes[0].c.r = 0;
++		Palettes[0].c.g = (44 - (word_20686 >> 1));
++		Palettes[0].c.b = 0;
++		stage3_bg_radius = (word_20686 - 400);
++		stage3_bg_angle--;
++	} else if(word_20686 < 800) {
++		Palettes[0].c.r = 0;
++		Palettes[0].c.g = 0;
++		Palettes[0].c.b = (144 - (word_20686 >> 1));
++		stage3_bg_radius = (word_20686 - 600);
++		stage3_bg_angle++;
++	} else if(word_20686 < 1000) {
++		Palettes[0].c.r = (244 - (word_20686 >> 1));
++		Palettes[0].c.g = 0;
++		Palettes[0].c.b = (244 - (word_20686 >> 1));
++		stage3_bg_radius = (word_20686 - 800);
++		stage3_bg_angle--;
++	} else {
++		word_20686 = 200;
++	}
++	palette_show();
++	egc_off();
++	grcg_setcolor(GC_RMW, 7);
++	for((i = 0, angle = stage3_bg_angle); i < 64; (i++, angle += 4)) {
++		left = polar_x_fast(stage3_bg_center_x, stage3_bg_radius, angle);
++		top = polar_y_fast(stage3_bg_center_y, stage3_bg_radius, angle);
++		stage3_bg_dots[page_back][i].x = left;
++		stage3_bg_dots[page_back][i].y = top;
++		top += scroll_line;
++		if(top >= RES_Y) {
++			top -= RES_Y;
++		}
++		grcg_pset(left, top);
++	}
++	grcg_off();
++}
+ 
+ // State
+ // -----
+@@ -14,4 +105,270 @@ extern screen_x_t midboss3_left_on_page[STONE_COUNT][PAGE_COUNT];
+ extern screen_y_t midboss3_top_on_page[STONE_COUNT][PAGE_COUNT];
+ extern screen_x_t* midboss3_left_on_back_page[STONE_COUNT];
+ extern screen_y_t* midboss3_top_on_back_page[STONE_COUNT];
++
++extern unsigned char midboss3_angle[MIDBOSS3_COUNT];
++extern uint8_t midboss3_rounds;
+ // -----
++
++int midboss3_invalidate(void)
++{
++	register int i;
++	register int removed = 0;
++
++	for(i = 0; i < MIDBOSS3_COUNT; i++) {
++		if(midboss3_flag[i] == M3F_REMOVED) {
++			removed++;
++			continue;
++		}
++		midboss3_left_on_back_page[i] = &midboss3_left_on_page[i][page_back];
++		midboss3_top_on_back_page[i] = &midboss3_top_on_page[i][page_back];
++		tiles_invalidate_rect(
++			*midboss3_left_on_back_page[i], *midboss3_top_on_back_page[i], 64, 32
++		);
++		*midboss3_left_on_back_page[i] = midboss3_left_on_page[i][page_front];
++		*midboss3_top_on_back_page[i] = midboss3_top_on_page[i][page_front];
++	}
++	if(removed == MIDBOSS3_COUNT) {
++		return false;
++	}
++	return true;
++}
++
++void pascal near midboss3_hit_put(int i)
++{
++	register vram_y_t vram_top;
++
++	snd_se_play(4);
++	vram_top = *midboss3_top_on_back_page[i];
++	vram_top += scroll_line;
++	if(vram_top >= RES_Y) {
++		vram_top -= RES_Y;
++	}
++	super_roll_put_1plane(
++		*midboss3_left_on_back_page[i],
++		vram_top,
++		stone_patnum[STONE_INNER_WEST],
++		0,
++		super_plane(V_WHITE)
++	);
++}
++
++void pascal near midboss3_put(int i)
++{
++	register vram_y_t vram_top;
++
++	vram_top = *midboss3_top_on_back_page[i];
++	vram_top += scroll_line;
++	if(vram_top >= RES_Y) {
++		vram_top -= RES_Y;
++	}
++	super_roll_put(
++		*midboss3_left_on_back_page[i], vram_top, stone_patnum[STONE_INNER_WEST]
++	);
++}
++
++void pascal near midboss3_kill_animate(int i)
++{
++	int patnum;
++	vram_y_t vram_top;
++
++	sparks_add(
++		(*midboss3_left_on_back_page[i] + 32),
++		(*midboss3_top_on_back_page[i] + 16),
++		((3 << 4) + 12),
++		1,
++		false
++	);
++	patnum = 10;
++	patnum += (midboss3_kill_frame[i] / 6);
++	midboss3_kill_frame[i]++;
++	if(midboss3_kill_frame[i] >= 48) {
++		sparks_add(
++			(*midboss3_left_on_back_page[i] + 32),
++			(*midboss3_top_on_back_page[i] + 16),
++			(8 << 4),
++			32,
++			true
++		);
++		midboss3_kill_frame[i] = 0;
++		midboss3_flag[i] = M3F_REMOVED;
++		shot_target_left = -1;
++		shot_target_top = -1;
++	} else {
++		vram_top = *midboss3_top_on_back_page[i];
++		vram_top += scroll_line;
++		if(vram_top >= RES_Y) {
++			vram_top -= RES_Y;
++		}
++		super_roll_put(*midboss3_left_on_back_page[i], vram_top, patnum);
++		super_roll_put((*midboss3_left_on_back_page[i] + 32), vram_top, patnum);
++	}
++}
++
++void pascal near midboss3_fire(int i)
++{
++	int velocity;
++	uint8_t group;
++	screen_y_t top;
++
++	velocity = ((i == 0) ? 8 : -8);
++	top = (*midboss3_top_on_back_page[i] + 12);
++	if(boss_phase_frame < 152) {
++		if(boss_phase_frame == 128) {
++			midboss3_angle[0] = 0x00;
++			midboss3_angle[1] = 0x80;
++		}
++		if((boss_phase_frame & 3) == 0) {
++			midboss3_angle[i] += velocity;
++			bullets_add_pellet(
++				(*midboss3_left_on_back_page[i] + 28),
++				top,
++				midboss3_angle[i],
++				BG_1,
++				((2 << 4) + 8)
++			);
++		}
++	} else if(boss_phase_frame < 192) {
++		*midboss3_left_on_back_page[i] += velocity;
++		if((boss_phase_frame & 7) == 0) {
++			midboss3_angle[i] += (velocity * 2);
++			if(rank != RANK_EASY) {
++				group = BG_4_SPREAD_MEDIUM;
++			} else {
++				group = BG_2_SPREAD_MEDIUM;
++			}
++			bullets_add_pellet(
++				(*midboss3_left_on_back_page[i] + 28),
++				top,
++				(0x80 - midboss3_angle[i]),
++				group,
++				((2 << 4) + 8)
++			);
++		}
++	} else if(boss_phase_frame < 352) {
++		*midboss3_top_on_back_page[i] += 2;
++		if(*midboss3_top_on_back_page[i] >= RES_Y) {
++			*midboss3_top_on_back_page[i] -= RES_Y;
++		}
++	} else if(boss_phase_frame < 376) {
++		if((boss_phase_frame & 3) == 0) {
++			midboss3_angle[i] -= velocity;
++			bullets_add_pellet(
++				(*midboss3_left_on_back_page[i] + 28),
++				top,
++				midboss3_angle[i],
++				BG_1,
++				((3 << 4) + 2)
++			);
++		}
++	} else if(boss_phase_frame < 416) {
++		*midboss3_left_on_back_page[i] -= velocity;
++		if((boss_phase_frame & 3) == 0) {
++			midboss3_angle[i] -= velocity;
++			bullets_add_pellet(
++				(*midboss3_left_on_back_page[i] + 28),
++				top,
++				midboss3_angle[i],
++				BG_1,
++				((3 << 4) + 2)
++			);
++		}
++	} else if(boss_phase_frame < 576) {
++		*midboss3_top_on_back_page[i] -= 2;
++		if(*midboss3_top_on_back_page[i] < 0) {
++			*midboss3_top_on_back_page[i] += RES_Y;
++		}
++		if((boss_phase_frame % 60) == 0) {
++			bullets_add_pellet(
++				(*midboss3_left_on_back_page[i] + 28),
++				top,
++				0x00,
++				BG_1_AIMED,
++				((2 << 4) + 8)
++			);
++		}
++	} else {
++		boss_phase_frame = 127; // Skip the scroll-in animation
++	}
++}
++
++extern uint8_t scroll_speed_this_frame;
++
++void midboss3_update_and_render(void)
++{
++	int removed = 0;
++	register int i;
++	register int damage;
++
++	if(midboss3_flag[0] == M3F_ALIVE) {
++		shot_target_left = (midboss3_left_on_page[0][page_back] + 24);
++		shot_target_top = (midboss3_top_on_page[0][page_back] + 16);
++	} else {
++		shot_target_left = (midboss3_left_on_page[1][page_back] + 24);
++		shot_target_top = (midboss3_top_on_page[1][page_back] + 16);
++	}
++	boss_phase_frame++;
++	if(boss_phase_frame == 1) {
++		midboss3_left_on_page[0][0] = PLAYFIELD_LEFT;
++		midboss3_left_on_page[0][1] = PLAYFIELD_LEFT;
++		midboss3_top_on_page[0][0] = -16;
++		midboss3_top_on_page[0][1] = -16;
++		midboss3_damage[0] = 0;
++		midboss3_left_on_page[1][0] = (PLAYFIELD_RIGHT - 64);
++		midboss3_left_on_page[1][1] = (PLAYFIELD_RIGHT - 64);
++		midboss3_top_on_page[1][0] = midboss3_top_on_page[0][0];
++		midboss3_top_on_page[1][1] = midboss3_top_on_page[0][0];
++		midboss3_damage[1] = 0;
++		midboss3_rounds = 0;
++	} else if(boss_phase_frame < 128) {
++		stone_patnum[STONE_INNER_WEST] = ((scroll_line & 3) + 144);
++		for(i = 0; i < MIDBOSS3_COUNT; i++) {
++			*midboss3_top_on_back_page[i] += scroll_speed_this_frame;
++			if((damage = shots_hittest(
++				(*midboss3_left_on_back_page[i] + 12),
++				*midboss3_top_on_back_page[i],
++				40,
++				30
++			)) != 0) {
++				midboss3_damage[i] += damage;
++				midboss3_hit_put(i);
++			} else {
++				midboss3_put(i);
++			}
++		}
++	} else {
++		stone_patnum[STONE_INNER_WEST] = ((scroll_line & 3) + 144);
++		if(boss_phase_frame == 128) {
++			midboss3_rounds++;
++		}
++		for(i = 0; i < MIDBOSS3_COUNT; i++) {
++			if(midboss3_flag[i] == M3F_KILL_ANIM) {
++				midboss3_kill_animate(i);
++			} else if(midboss3_flag[i] == M3F_ALIVE) {
++				midboss3_fire(i);
++				if((damage = shots_hittest(
++					(*midboss3_left_on_back_page[i] + 12),
++					*midboss3_top_on_back_page[i],
++					40,
++					30
++				)) != 0) {
++					midboss3_damage[i] += damage;
++					if(midboss3_damage[i] <= 280) {
++						midboss3_hit_put(i);
++					} else {
++						snd_se_play(2);
++						midboss3_flag[i] = M3F_KILL_ANIM;
++						score_delta += 20000;
++					}
++				} else {
++					midboss3_put(i);
++				}
++				if(midboss3_rounds >= 4) {
++					midboss3_flag[i] = M3F_KILL_ANIM;
++				}
++			} else if(midboss3_flag[i] == M3F_REMOVED) {
++				removed++;
++			}
++		}
++	}
++}
+diff --git a/th02/stage3.cpp b/th02/stage3.cpp
+new file mode 100644
+index 00000000..18a5c4c1
+--- /dev/null
++++ b/th02/stage3.cpp
+@@ -0,0 +1,53 @@
++/* ReC98
++ * -----
++ * Stage 3 of TH02's MAIN.EXE: background effect, midboss and the Five Magic
++ * Stones
++ */
++
++#pragma option -zCDIALOG_TEXT -zPmain_03 -G
++
++#include "platform.h"
++#include "x86real.h"
++#include "pc98.h"
++#include "libs/master.lib/master.hpp"
++#include "libs/master.lib/pc98_gfx.hpp"
++#include "th02/core/globals.hpp"
++#include "th02/main/playfld.hpp"
++#include "th02/main/scroll.hpp"
++#include "th02/main/boss/b3.hpp"
++#include "th02/main/boss/boss.hpp"
++#include "th02/main/dialog/dialog.hpp"
++#include "th02/main/hud/overlay.hpp"
++#include "th02/main/stage/bonus.hpp"
++#include "th02/main/stage/stage.hpp"
++#include "th02/main/slowdown.hpp"
++#include "th02/hardware/pages.hpp"
++#include "th01/math/polar.hpp"
++#include "th01/sprites/pellet.h"
++#include "th02/sprites/main_pat.h"
++#include "th02/math/randring.hpp"
++#include "th02/snd/snd.h"
++#include "th02/hardware/egc.hpp"
++#include "th02/main/bullet/bullet.hpp"
++#include "th02/main/player/player.hpp"
++#include "th02/main/tile/tile.hpp"
++#include "th01/rank.h"
++#include "th02/v_colors.hpp"
++#include "th02/main/score.hpp"
++#include "th02/main/spark.hpp"
++#include "th02/main/item/item.hpp"
++
++static const pixel_t STONE_W = 32;
++
++extern screen_x_t stone_left[STONE_COUNT];
++extern screen_y_t stone_top[STONE_COUNT];
++extern int stone_patnum[STONE_COUNT];
++extern screen_x_t shot_target_left;
++extern screen_y_t shot_target_top;
++
++int pascal near shots_hittest(
++	screen_x_t left, screen_y_t top, pixel_t w, pixel_t h
++);
++
++#include "th02/main/midboss/m3.cpp"
++#include "th02/main/boss/b3.cpp"
+diff --git a/th02_main.asm b/th02_main.asm
+index 16e38610..dafb969b 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -940,950 +940,10 @@ BULLET16_W = 16
+ 
+ ; Attributes: bp-based frame
+ 
+-public @sub_10E4F$qv
+-@sub_10E4F$qv	proc far
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		xor	si, si
+-		jmp	short loc_10E8D
+-; ---------------------------------------------------------------------------
+-
+-loc_10E57:
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 8
+-		mov	dx, si
+-		shl	dx, 2
+-		add	ax, dx
+-		mov	bx, ax
+-		push	word ptr [bx+5336h]	; left
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 8
+-		mov	dx, si
+-		shl	dx, 2
+-		add	ax, dx
+-		mov	bx, ax
+-		push	word ptr [bx+5338h]	; top
+-		push	(1 shl 16) or 2	; (w shl 16) or h
+-		call	@tiles_invalidate_rect$qiiii
+-		inc	si
+-
+-loc_10E8D:
+-		cmp	si, 40h
+-		jl	short loc_10E57
+-		pop	si
+-		pop	bp
+-		retf
+-@sub_10E4F$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @sub_10E95$qv
+-@sub_10E95$qv	proc far
+-
+-@@angle		= byte ptr -3
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		push	si
+-		push	di
+-		inc	_word_20686
+-		cmp	_word_20686, 0A8h ; '¨'
+-		jb	loc_110B3
+-		cmp	_word_20686, 0A8h ; '¨'
+-		jnz	short loc_10EC0
+-		call	_snd_se_play c, 14
+-		jmp	loc_10FF6
+-; ---------------------------------------------------------------------------
+-
+-loc_10EC0:
+-		cmp	_word_20686, 0C8h
+-		jnb	short loc_10F22
+-		cmp	_word_20686, 0B4h
+-		ja	short loc_10EE4
+-		mov	ax, _word_20686
+-		and	ax, 1
+-		imul	ax, 70
+-		add	ax, 100
+-		mov	PaletteTone, ax
+-		call	far ptr	palette_show
+-
+-loc_10EE4:
+-		mov	ax, _word_20686
+-		and	ax, 1
+-		mov	di, ax
+-		mov	ax, RES_Y
+-		sub	ax, _scroll_line
+-		push	ax
+-		mov	ax, _scroll_line
+-		imul	ax, 40
+-		add	ax, di
+-		push	ax
+-		push	di
+-		call	graph_scroll
+-		mov	_slowdown_factor, 3
+-		mov	word_22DA0, 0E0h
+-		mov	word_22DA2, 0C8h
+-		mov	word_22D9E, 0
+-		mov	byte_22DA4, 0
+-		jmp	loc_10FF6
+-; ---------------------------------------------------------------------------
+-
+-loc_10F22:
+-		cmp	_word_20686, 190h
+-		jnb	short loc_10F5E
+-		cmp	_word_20686, 0C8h
+-		jnz	short loc_10F37
+-		mov	_slowdown_factor, 1
+-
+-loc_10F37:
+-		mov	ax, _word_20686
+-		shr	ax, 1
+-		mov	dl, 200
+-		sub	dl, al
+-		mov	Palettes[0 * size rgb_t].r, dl
+-		mov	Palettes[0 * size rgb_t].g, 0
+-		mov	Palettes[0 * size rgb_t].b, 0
+-		mov	ax, _word_20686
+-		sub	ax, 0C8h
+-		mov	word_22D9E, ax
+-		inc	byte_22DA4
+-		jmp	loc_10FF6
+-; ---------------------------------------------------------------------------
+-
+-loc_10F5E:
+-		cmp	_word_20686, 258h
+-		jnb	short loc_10F8C
+-		mov	Palettes[0 * size rgb_t].r, 0
+-		mov	ax, _word_20686
+-		shr	ax, 1
+-		mov	dl, 44
+-		sub	dl, al
+-		mov	Palettes[0 * size rgb_t].g, dl
+-		mov	Palettes[0 * size rgb_t].b, 0
+-		mov	ax, _word_20686
+-		sub	ax, 190h
+-		mov	word_22D9E, ax
+-		dec	byte_22DA4
+-		jmp	short loc_10FF6
+-; ---------------------------------------------------------------------------
+-
+-loc_10F8C:
+-		cmp	_word_20686, 320h
+-		jnb	short loc_10FBA
+-		mov	Palettes[0 * size rgb_t].r, 0
+-		mov	Palettes[0 * size rgb_t].g, 0
+-		mov	ax, _word_20686
+-		shr	ax, 1
+-		mov	dl, 144
+-		sub	dl, al
+-		mov	Palettes[0 * size rgb_t].b, dl
+-		mov	ax, _word_20686
+-		sub	ax, 258h
+-		mov	word_22D9E, ax
+-		inc	byte_22DA4
+-		jmp	short loc_10FF6
+-; ---------------------------------------------------------------------------
+-
+-loc_10FBA:
+-		cmp	_word_20686, 3E8h
+-		jnb	short loc_10FF0
+-		mov	ax, _word_20686
+-		shr	ax, 1
+-		mov	dl, 244
+-		sub	dl, al
+-		mov	Palettes[0 * size rgb_t].r, dl
+-		mov	Palettes[0 * size rgb_t].g, 0
+-		mov	ax, _word_20686
+-		shr	ax, 1
+-		mov	dl, 244
+-		sub	dl, al
+-		mov	Palettes[0 * size rgb_t].b, dl
+-		mov	ax, _word_20686
+-		sub	ax, 320h
+-		mov	word_22D9E, ax
+-		dec	byte_22DA4
+-		jmp	short loc_10FF6
+-; ---------------------------------------------------------------------------
+-
+-loc_10FF0:
+-		mov	_word_20686, 0C8h
+-
+-loc_10FF6:
+-		call	far ptr	palette_show
+-		call	egc_off
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + 7
+-		xor	di, di
+-		mov	al, byte_22DA4
+-		jmp	loc_110A4
+-; ---------------------------------------------------------------------------
+-
+-loc_11013:
+-		movsx	eax, word_22D9E
+-		mov	dl, [bp+@@angle]
+-		mov	dh, 0
+-		add	dx, dx
+-		mov	bx, dx
+-		movsx	edx, _CosTable8[bx]
+-		imul	eax, edx
+-		sar	eax, 8
+-		add	ax, word_22DA0
+-		mov	[bp+var_2], ax
+-		movsx	eax, word_22D9E
+-		mov	dl, [bp+@@angle]
+-		mov	dh, 0
+-		add	dx, dx
+-		mov	bx, dx
+-		movsx	edx, _SinTable8[bx]
+-		imul	eax, edx
+-		sar	eax, 8
+-		add	ax, word_22DA2
+-		mov	si, ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 8
+-		mov	dx, di
+-		shl	dx, 2
+-		add	ax, dx
+-		mov	dx, [bp+var_2]
+-		mov	bx, ax
+-		mov	[bx+5336h], dx
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 8
+-		mov	dx, di
+-		shl	dx, 2
+-		add	ax, dx
+-		mov	bx, ax
+-		mov	[bx+5338h], si
+-		add	si, _scroll_line
+-		cmp	si, RES_Y
+-		jl	short loc_11095
+-		sub	si, RES_Y
+-
+-loc_11095:
+-		push	[bp+var_2]
+-		push	si
+-		call	grcg_pset
+-		inc	di
+-		mov	al, [bp+@@angle]
+-		add	al, 4
+-
+-loc_110A4:
+-		mov	[bp+@@angle], al
+-		cmp	di, 40h
+-		jl	loc_11013
+-		call	grcg_off
+-
+-loc_110B3:
+-		pop	di
+-		pop	si
+-		leave
+-		retf
+-@sub_10E95$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-M3F_ALIVE = 0
+-M3F_KILL_ANIM = 1
+-M3F_REMOVED = 2
+-
+-; Attributes: bp-based frame
+-public @midboss3_invalidate$qv
+-@midboss3_invalidate$qv	proc far
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		push	di
+-		xor	di, di
+-		xor	si, si
+-		jmp	loc_1116C
+-; ---------------------------------------------------------------------------
+-
+-loc_110C3:
+-		cmp	midboss3_flag[si], M3F_REMOVED
+-		jnz	short loc_110CE
+-		inc	di
+-		jmp	loc_1116B
+-; ---------------------------------------------------------------------------
+-
+-loc_110CE:
+-		mov	ax, si
+-		shl	ax, 2
+-		mov	dl, _page_back
+-		mov	dh, 0
+-		add	dx, dx
+-		add	ax, dx
+-		add	ax, offset _midboss3_left_on_page
+-		mov	bx, si
+-		shl	bx, 2
+-		mov	word ptr (_midboss3_left_on_back_page + 2)[bx], ds
+-		mov	word ptr (_midboss3_left_on_back_page + 0)[bx], ax
+-		mov	ax, si
+-		shl	ax, 2
+-		mov	dl, _page_back
+-		mov	dh, 0
+-		add	dx, dx
+-		add	ax, dx
+-		add	ax, offset _midboss3_top_on_page
+-		mov	bx, si
+-		shl	bx, 2
+-		mov	word ptr (_midboss3_top_on_back_page + 2)[bx], ds
+-		mov	word ptr (_midboss3_top_on_back_page + 0)[bx], ax
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		push	word ptr es:[bx]	; left
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_top_on_back_page[bx]
+-		push	word ptr es:[bx]	; top
+-		push	(64 shl 16) or 32	; (w shl 16) or h
+-		call	@tiles_invalidate_rect$qiiii
+-		mov	bx, si
+-		shl	bx, 2
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		add	bx, ax
+-		mov	ax, _midboss3_left_on_page[bx]
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		mov	es:[bx], ax
+-		mov	bx, si
+-		shl	bx, 2
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		add	bx, ax
+-		mov	ax, _midboss3_top_on_page[bx]
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_top_on_back_page[bx]
+-		mov	es:[bx], ax
+-
+-loc_1116B:
+-		inc	si
+-
+-loc_1116C:
+-		cmp	si, MIDBOSS3_COUNT
+-		jl	loc_110C3
+-		cmp	di, MIDBOSS3_COUNT
+-		jnz	short loc_1117C
+-		xor	ax, ax
+-		jmp	short loc_1117F
+-; ---------------------------------------------------------------------------
+-
+-loc_1117C:
+-		mov	ax, 1
+-
+-loc_1117F:
+-		pop	di
+-		pop	si
+-		pop	bp
+-		retf
+-@midboss3_invalidate$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-midboss3_11183	proc near
+-
+-@@i	= word ptr  4
+-
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		push	di
+-		mov	di, [bp+@@i]
+-		call	_snd_se_play c, 4
+-		mov	bx, di
+-		shl	bx, 2
+-		les	bx, _midboss3_top_on_back_page[bx]
+-		mov	si, es:[bx]
+-		add	si, _scroll_line
+-		cmp	si, RES_Y
+-		jl	short loc_111AF
+-		sub	si, RES_Y
+-
+-loc_111AF:
+-		mov	bx, di
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		call	super_roll_put_1plane pascal, word ptr es:[bx], si, _stone_patnum[STONE_INNER_WEST * word], large PLANE_PUT or GC_BRGI
+-		pop	di
+-		pop	si
+-		pop	bp
+-		retn	2
+-midboss3_11183	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-midboss3_111D1	proc near
+-
+-@@i	= word ptr  4
+-
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		push	di
+-		mov	di, [bp+@@i]
+-		mov	bx, di
+-		shl	bx, 2
+-		les	bx, _midboss3_top_on_back_page[bx]
+-		mov	si, es:[bx]
+-		add	si, _scroll_line
+-		cmp	si, RES_Y
+-		jl	short loc_111F3
+-		sub	si, RES_Y
+-
+-loc_111F3:
+-		mov	bx, di
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		call	super_roll_put pascal, word ptr es:[bx], si, _stone_patnum[STONE_INNER_WEST * word]
+-		pop	di
+-		pop	si
+-		pop	bp
+-		retn	2
+-midboss3_111D1	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-midboss3_1120F	proc near
+-
+-@@patnum		= word ptr -2
+-@@i	= word ptr  4
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 2
+-		push	si
+-		push	di
+-		mov	si, [bp+@@i]
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 32
+-		push	ax	; left
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_top_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 16
+-		push	ax	; top
+-		push	(((3 shl 4) + 12) shl 16) or 1	; (speed_base shl 16) or count
+-		push	0	; as_sprite
+-		call	@sparks_add$qiuiiii
+-		mov	[bp+@@patnum], 10
+-		mov	bx, si
+-		add	bx, bx
+-		mov	ax, _midboss3_kill_frame[bx]
+-		mov	bx, 6
+-		cwd
+-		idiv	bx
+-		add	[bp+@@patnum], ax
+-		mov	bx, si
+-		add	bx, bx
+-		inc	_midboss3_kill_frame[bx]
+-		mov	bx, si
+-		add	bx, bx
+-		cmp	_midboss3_kill_frame[bx], 48
+-		jl	short loc_112BA
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 32
+-		push	ax	; left
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_top_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 16
+-		push	ax	; top
+-		push	((8 shl 4) shl 16) or 32	; (speed_base shl 16) or count
+-		push	1	; as_sprite
+-		call	@sparks_add$qiuiiii
+-		mov	bx, si
+-		add	bx, bx
+-		mov	_midboss3_kill_frame[bx], 0
+-		mov	midboss3_flag[si], M3F_REMOVED
+-		mov	_shot_target_left, 0FFFFh
+-		mov	_shot_target_top, 0FFFFh
+-		jmp	short loc_11302
+-; ---------------------------------------------------------------------------
+-
+-loc_112BA:
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_top_on_back_page[bx]
+-		mov	di, es:[bx]
+-		add	di, _scroll_line
+-		cmp	di, RES_Y
+-		jl	short loc_112D4
+-		sub	di, RES_Y
+-
+-loc_112D4:
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		call	super_roll_put pascal, word ptr es:[bx], di, [bp+@@patnum]
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 32
+-		call	super_roll_put pascal, ax, di, [bp+@@patnum]
+-
+-loc_11302:
+-		pop	di
+-		pop	si
+-		leave
+-		retn	2
+-midboss3_1120F	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-midboss3_11308	proc near
+-
+-@@group	= byte ptr -3
+-var_2		= word ptr -2
+-@@i	= word ptr  4
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		push	si
+-		push	di
+-		mov	si, [bp+@@i]
+-		or	si, si
+-		jnz	short loc_1131C
+-		mov	ax, 8
+-		jmp	short loc_1131F
+-; ---------------------------------------------------------------------------
+-
+-loc_1131C:
+-		mov	ax, 0FFF8h
+-
+-loc_1131F:
+-		mov	[bp+var_2], ax
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_top_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 12
+-		mov	di, ax
+-		cmp	_boss_phase_frame, 152
+-		jge	short loc_11381
+-		cmp	_boss_phase_frame, 128
+-		jnz	short loc_1134D
+-		mov	byte_22FA6, 0
+-		mov	byte_22FA7, 80h
+-
+-loc_1134D:
+-		test	byte ptr _boss_phase_frame, 3
+-		jnz	loc_114D0
+-		mov	al, [si+5536h]
+-		add	al, byte ptr [bp+var_2]
+-		mov	[si+5536h], al
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 28
+-		push	ax	; left
+-		push	di	; top
+-		mov	al, [si+5536h]
+-		push	ax	; angle
+-		push	BG_1	; group
+-
+-loc_11379:
+-		push	((2 shl 4) + 8)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-		jmp	loc_114D0
+-; ---------------------------------------------------------------------------
+-
+-loc_11381:
+-		cmp	_boss_phase_frame, 192
+-		jge	short loc_113DE
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		mov	ax, [bp+var_2]
+-		add	es:[bx], ax
+-		test	byte ptr _boss_phase_frame, 7
+-		jnz	loc_114D0
+-		mov	al, [si+5536h]
+-		mov	dl, byte ptr [bp+var_2]
+-		add	dl, dl
+-		add	al, dl
+-		mov	[si+5536h], al
+-		cmp	_rank, RANK_EASY
+-		jz	short loc_113BD
+-		mov	[bp+@@group], BG_4_SPREAD_MEDIUM
+-		jmp	short loc_113C1
+-; ---------------------------------------------------------------------------
+-
+-loc_113BD:
+-		mov	[bp+@@group], BG_2_SPREAD_MEDIUM
+-
+-loc_113C1:
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 28
+-		push	ax	; left
+-		push	di	; top
+-		mov	al, 80h
+-		sub	al, [si+5536h]
+-		push	ax	; angle
+-		push	word ptr [bp+@@group]	; group
+-		jmp	short loc_11379
+-; ---------------------------------------------------------------------------
+-
+-loc_113DE:
+-		cmp	_boss_phase_frame, 352
+-		jge	short loc_11416
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_top_on_back_page[bx]
+-		add	word ptr es:[bx], 2
+-		mov	bx, si
+-		shl	bx, 2
+-		mov	bx, word ptr _midboss3_top_on_back_page[bx]
+-		cmp	word ptr es:[bx], RES_Y
+-		jl	loc_114D0
+-		mov	bx, si
+-		shl	bx, 2
+-		mov	bx, word ptr _midboss3_top_on_back_page[bx]
+-		sub	word ptr es:[bx], RES_Y
+-		jmp	loc_114D0
+-; ---------------------------------------------------------------------------
+-
+-loc_11416:
+-		cmp	_boss_phase_frame, 376
+-		jge	short loc_11429
+-		test	byte ptr _boss_phase_frame, 3
+-		jnz	loc_114D0
+-		jmp	short loc_11449
+-; ---------------------------------------------------------------------------
+-
+-loc_11429:
+-		cmp	_boss_phase_frame, 416
+-		jge	short loc_11473
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		mov	ax, [bp+var_2]
+-		sub	es:[bx], ax
+-		test	byte ptr _boss_phase_frame, 3
+-		jnz	loc_114D0
+-
+-loc_11449:
+-		mov	al, [si+5536h]
+-		sub	al, byte ptr [bp+var_2]
+-		mov	[si+5536h], al
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 28
+-		push	ax	; left
+-		push	di	; top
+-		mov	al, [si+5536h]
+-		push	ax	; angle
+-		push	BG_1	; group
+-		push	((3 shl 4) + 2)	; speed
+-		call	@bullets_add_pellet$qiiucuci
+-		jmp	short loc_114D0
+-; ---------------------------------------------------------------------------
+-
+-loc_11473:
+-		cmp	_boss_phase_frame, 576
+-		jge	short loc_114CA
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_top_on_back_page[bx]
+-		sub	word ptr es:[bx], 2
+-		mov	bx, si
+-		shl	bx, 2
+-		mov	bx, word ptr _midboss3_top_on_back_page[bx]
+-		cmp	word ptr es:[bx], 0
+-		jge	short loc_114A5
+-		mov	bx, si
+-		shl	bx, 2
+-		mov	bx, word ptr _midboss3_top_on_back_page[bx]
+-		add	word ptr es:[bx], RES_Y
+-
+-loc_114A5:
+-		mov	ax, _boss_phase_frame
+-		mov	bx, 60
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jnz	short loc_114D0
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 28
+-		push	ax	; left
+-		push	di	; top
+-		push	00h	; angle
+-		push	BG_1_AIMED	; group
+-		jmp	loc_11379
+-; ---------------------------------------------------------------------------
+-
+-loc_114CA:
+-		mov	_boss_phase_frame, 127 ; Skip the scroll-in animation
+-
+-loc_114D0:
+-		pop	di
+-		pop	si
+-		leave
+-		retn	2
+-midboss3_11308	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-public @midboss3_update_and_render$qv
+-@midboss3_update_and_render$qv	proc far
+-
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 2
+-		push	si
+-		push	di
+-		mov	[bp+var_2], 0
+-		cmp	midboss3_flag[0], M3F_ALIVE
+-		jnz	short loc_1150C
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, midboss3_0_left_on_page[bx]
+-		add	ax, 24
+-		mov	_shot_target_left, ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, midboss3_0_top_on_page[bx]
+-		jmp	short loc_1152C
+-; ---------------------------------------------------------------------------
+-
+-loc_1150C:
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, midboss3_1_left_on_page[bx]
+-		add	ax, 24
+-		mov	_shot_target_left, ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, midboss3_1_top_on_page[bx]
+-
+-loc_1152C:
+-		add	ax, 16
+-		mov	_shot_target_top, ax
+-		inc	_boss_phase_frame
+-		cmp	_boss_phase_frame, 1
+-		jnz	short loc_11581
+-		mov	midboss3_0_left_on_page_0, PLAYFIELD_LEFT
+-		mov	midboss3_0_left_on_page_1, PLAYFIELD_LEFT
+-		mov	midboss3_0_top_on_page_0, -16
+-		mov	midboss3_0_top_on_page_1, -16
+-		mov	midboss3_damage[0 * word], 0
+-		mov	midboss3_1_left_on_page_0, (PLAYFIELD_RIGHT - 64)
+-		mov	midboss3_1_left_on_page_1, (PLAYFIELD_RIGHT - 64)
+-		mov	ax, midboss3_0_top_on_page_0
+-		mov	midboss3_1_top_on_page_0, ax
+-		mov	ax, midboss3_0_top_on_page_0
+-		mov	midboss3_1_top_on_page_1, ax
+-		mov	midboss3_damage[1 * word], 0
+-		mov	byte_22FA8, 0
+-		jmp	loc_116A9
+-; ---------------------------------------------------------------------------
+-
+-loc_11581:
+-		cmp	_boss_phase_frame, 128
+-		jge	short loc_115F0
+-		mov	ax, _scroll_line
+-		and	ax, 3
+-		add	ax, 144
+-		mov	_stone_patnum[STONE_INNER_WEST * word], ax
+-		xor	si, si
+-		jmp	short loc_115E8
+-; ---------------------------------------------------------------------------
+-
+-loc_11599:
+-		mov	al, _scroll_speed_this_frame
+-		mov	ah, 0
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_top_on_back_page[bx]
+-		add	es:[bx], ax
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 12
+-		push	ax
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_top_on_back_page[bx]
+-		push	word ptr es:[bx]
+-		push	28001Eh
+-		call	@SHOTS_HITTEST$QIIII
+-		mov	di, ax
+-		or	ax, ax
+-		jz	short loc_115E3
+-		mov	bx, si
+-		add	bx, bx
+-		add	midboss3_damage[bx], di
+-		call	midboss3_11183 pascal, si
+-		jmp	short loc_115E7
+-; ---------------------------------------------------------------------------
+-
+-loc_115E3:
+-		call	midboss3_111D1 pascal, si
+-
+-loc_115E7:
+-		inc	si
+-
+-loc_115E8:
+-		cmp	si, MIDBOSS3_COUNT
+-		jl	short loc_11599
+-		jmp	loc_116A9
+-; ---------------------------------------------------------------------------
+-
+-loc_115F0:
+-		mov	ax, _scroll_line
+-		and	ax, 3
+-		add	ax, 144
+-		mov	_stone_patnum[STONE_INNER_WEST * word], ax
+-		cmp	_boss_phase_frame, 128
+-		jnz	short loc_11608
+-		inc	byte_22FA8
+-
+-loc_11608:
+-		xor	si, si
+-		jmp	loc_116A2
+-; ---------------------------------------------------------------------------
+-
+-loc_1160D:
+-		cmp	midboss3_flag[si], M3F_KILL_ANIM
+-		jnz	short loc_1161B
+-		call	midboss3_1120F pascal, si
+-		jmp	loc_116A1
+-; ---------------------------------------------------------------------------
+-
+-loc_1161B:
+-		cmp	midboss3_flag[si], M3F_ALIVE
+-		jnz	short loc_11697
+-		call	midboss3_11308 pascal, si
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_left_on_back_page[bx]
+-		mov	ax, es:[bx]
+-		add	ax, 12
+-		push	ax
+-		mov	bx, si
+-		shl	bx, 2
+-		les	bx, _midboss3_top_on_back_page[bx]
+-		push	word ptr es:[bx]
+-		push	28001Eh
+-		call	@SHOTS_HITTEST$QIIII
+-		mov	di, ax
+-		or	ax, ax
+-		jz	short loc_11685
+-		mov	bx, si
+-		add	bx, bx
+-		add	midboss3_damage[bx], di
+-		mov	bx, si
+-		add	bx, bx
+-		cmp	word ptr midboss3_damage[bx], 280
+-		jg	short loc_1166B
+-		call	midboss3_11183 pascal, si
+-		jmp	short loc_11689
+-; ---------------------------------------------------------------------------
+-
+-loc_1166B:
+-		call	_snd_se_play c, 2
+-		mov	midboss3_flag[si], M3F_KILL_ANIM
+-		add	_score_delta, 20000
+-		jmp	short loc_11689
+-; ---------------------------------------------------------------------------
+-
+-loc_11685:
+-		call	midboss3_111D1 pascal, si
+-
+-loc_11689:
+-		cmp	byte_22FA8, 4
+-		jb	short loc_116A1
+-		mov	midboss3_flag[si], M3F_KILL_ANIM
+-		jmp	short loc_116A1
+-; ---------------------------------------------------------------------------
+-
+-loc_11697:
+-		cmp	midboss3_flag[si], M3F_REMOVED
+-		jnz	short loc_116A1
+-		inc	[bp+var_2]
+-
+-loc_116A1:
+-		inc	si
+-
+-loc_116A2:
+-		cmp	si, MIDBOSS3_COUNT
+-		jl	loc_1160D
+-
+-loc_116A9:
+-		pop	di
+-		pop	si
+-		leave
+-		retf
+-@midboss3_update_and_render$qv	endp
+-
+-SF_DORMANT = 0
+-SF_ACTIVE = 1
+-SF_KILL_ANIM = 2
+-SF_REMOVE = 3
+-SF_REMOVED = 4
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
++	extern @sub_10E4F$qv:proc
++	extern @sub_10E95$qv:proc
++	extern @midboss3_invalidate$qv:proc
++	extern @midboss3_update_and_render$qv:proc
+ 	extern @stones_bg_render$qv:proc
+ 	extern @stones_update$qv:proc
+ 	extern @stones_end$qv:proc
+@@ -12814,14 +11874,20 @@ public _stones_bullet_top
+ _stones_bullet_top	dw ?
+ public _stones_y_22D9C
+ _stones_y_22D9C	dw ?
+-word_22D9E	dw ?
+-word_22DA0	dw ?
+-word_22DA2	dw ?
+-byte_22DA4	db ?
+-		db 513 dup(?)
+-byte_22FA6	db ?
+-byte_22FA7	db ?
+-byte_22FA8	db ?
++public _stage3_bg_radius
++_stage3_bg_radius	dw ?
++public _stage3_bg_center_x
++_stage3_bg_center_x	dw ?
++public _stage3_bg_center_y
++_stage3_bg_center_y	dw ?
++public _stage3_bg_angle
++_stage3_bg_angle	db ?
++		db ?
++public _stage3_bg_dots
++_stage3_bg_dots	dw (2 * 64 * 2) dup(?)
++public _midboss3_angle, _midboss3_rounds
++_midboss3_angle	db 2 dup(?)
++_midboss3_rounds	db ?
+ 		db ?
+ public _stones_pattern_frame
+ _stones_pattern_frame	dw ?
