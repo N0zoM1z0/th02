@@ -1,0 +1,263 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:58:16 +0100
+Subject: [PATCH] [th02] Move the shared uninitialized variables into C++
+ wrapper TUs
+
+---
+ Tupfile.lua                        | 12 ++++++------
+ planar.h                           |  6 ++++++
+ th02/hardware/input_sense[bss].asm |  2 --
+ th02/input_rs.cpp                  | 11 +++++++++++
+ th02/main/pf.asm                   |  6 +++---
+ th02/pi_load.cpp                   |  3 +++
+ th02/snd_ld_2.cpp                  |  8 ++++++++
+ th02/vplanset.cpp                  | 11 +++++++++++
+ th02_main.asm                      |  8 +-------
+ th02_maine.asm                     |  8 +-------
+ th02_op.asm                        |  8 +-------
+ 11 files changed, 51 insertions(+), 32 deletions(-)
+ delete mode 100644 th02/hardware/input_sense[bss].asm
+ create mode 100644 th02/snd_ld_2.cpp
+ create mode 100644 th02/vplanset.cpp
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index 33880e16..4d458f06 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -494,7 +494,7 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='O'" }):link("op", {
+ 	"th02/exit_dos.cpp",
+ 	"th02/zunerror.cpp",
+ 	"th02/grppsafx.cpp",
+-	"th01/vplanset.cpp",
++	"th02/vplanset.cpp",
+ 	"th02/pi_load.cpp",
+ 	"th02/main/pf.asm",
+ 	"th02/grp_rect.cpp",
+@@ -505,7 +505,7 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='O'" }):link("op", {
+ 	"th02/snd_mmdr.c",
+ 	"th02/snd_mode.c",
+ 	"th02/snd_pmdr.c",
+-	"th02/snd_load.cpp",
++	"th02/snd_ld_2.cpp",
+ 	"th02/pi_put.cpp",
+ 	"th02/snd_kaja.cpp",
+ 	"th02/op_02_3.cpp",
+@@ -525,7 +525,7 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/zunerror.cpp",
+ 	"th02/keydelay.cpp",
+ 	"th02/main02_1.cpp",
+-	"th01/vplanset.cpp",
++	"th02/vplanset.cpp",
+ 	"th02/pi_load.cpp",
+ 	"th02/vector.cpp",
+ 	"th02/main/mpn_put.cpp",
+@@ -538,7 +538,7 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/snd_mode.c",
+ 	"th02/snd_pmdr.c",
+ 	"th02/snd_dlyv.c",
+-	"th02/snd_load.cpp",
++	"th02/snd_ld_2.cpp",
+ 	"th02/mpn_l_i.cpp",
+ 	"th02/initmain.cpp",
+ 	"th02/pi_put.cpp",
+@@ -587,7 +587,7 @@ local th02_maine_tlink = th02:branch(MODEL_LARGE, { cflags = "-DBINARY='E'" }):l
+ 	"th02_maine.asm",
+ 	"th02/grppsafx.cpp",
+ 	"th02/keydelay.cpp",
+-	"th01/vplanset.cpp",
++	"th02/vplanset.cpp",
+ 	"th02/pi_load.cpp",
+ 	"th02/main/pf.asm",
+ 	"th02/frmdely1.cpp",
+@@ -597,7 +597,7 @@ local th02_maine_tlink = th02:branch(MODEL_LARGE, { cflags = "-DBINARY='E'" }):l
+ 	"th02/snd_mmdr.c",
+ 	"th02/snd_mode.c",
+ 	"th02/snd_pmdr.c",
+-	"th02/snd_load.cpp",
++	"th02/snd_ld_2.cpp",
+ 	"th02/initmain.cpp",
+ 	"th02/pi_put.cpp",
+ 	"th02/snd_kaja.cpp",
+diff --git a/planar.h b/planar.h
+index a43a44a0..ff928808 100644
+--- a/planar.h
++++ b/planar.h
+@@ -74,7 +74,13 @@ template <class RowDots, pixel_t H> struct DotRect {
+ 
+ // Since array subscripts create slightly different assembly in places, we
+ // offer both variants.
++#if (GAME == 2)
++// TH02 defines the four planes as separate variables in this order, and only
++// ever accesses them as an array via the first one.
++#define VRAM_PLANE (&VRAM_PLANE_B)
++#else
+ extern dots8_t far *VRAM_PLANE[PLANE_COUNT];
++#endif
+ // And no, expressing these as a struct won't generate the same ASM.
+ // Been there, tried that.
+ extern dots8_t far *VRAM_PLANE_B;
+diff --git a/th02/hardware/input_sense[bss].asm b/th02/hardware/input_sense[bss].asm
+deleted file mode 100644
+index 6dff19e0..00000000
+--- a/th02/hardware/input_sense[bss].asm
++++ /dev/null
+@@ -1,2 +0,0 @@
+-public _key_det
+-_key_det	dw ? ; ZUN symbol [MAGNet2010]
+diff --git a/th02/input_rs.cpp b/th02/input_rs.cpp
+index ae561f03..94441e02 100644
+--- a/th02/input_rs.cpp
++++ b/th02/input_rs.cpp
+@@ -1 +1,12 @@
+ #include "th02/hardware/input_rs.cpp"
++
++input_t key_det; /* ZUN symbol [MAGNet2010] */
++
++// The sound driver flags follow in this TU. (In C, TCC would emit them as
++// communal variables, in a different order.)
++#include "th02/snd/snd.h"
++
++bool snd_fm_possible;
++bool snd_midi_active;
++char snd_interrupt_if_midi; // has no effect
++bool snd_midi_possible;
+diff --git a/th02/main/pf.asm b/th02/main/pf.asm
+index c026556e..d8e676f4 100644
+--- a/th02/main/pf.asm
++++ b/th02/main/pf.asm
+@@ -9,9 +9,6 @@
+ include ReC98.inc
+ 
+ 	.data
+-	extrn parfilename:byte
+-	extrn pfint21_pf:word
+-	extrn pfint21_handle:word
+ 	extrn pferrno:word
+ 	extrn pfkey:byte
+ 	extrn mem_AllocID:word
+@@ -41,4 +38,7 @@ include libs/master.lib/pf_str_ieq.asm
+ 
+ _TEXT	ends
+ 
++	.data?
++include libs/master.lib/pfint21[bss].asm
++
+ 	end
+diff --git a/th02/pi_load.cpp b/th02/pi_load.cpp
+index dd2b55eb..896c2855 100644
+--- a/th02/pi_load.cpp
++++ b/th02/pi_load.cpp
+@@ -1 +1,4 @@
+ #include "th02/formats/pi_load.cpp"
++
++void far *pi_buffers[PI_SLOT_COUNT];
++PiHeader pi_headers[PI_SLOT_COUNT];
+diff --git a/th02/snd_ld_2.cpp b/th02/snd_ld_2.cpp
+new file mode 100644
+index 00000000..134e83f1
+--- /dev/null
++++ b/th02/snd_ld_2.cpp
+@@ -0,0 +1,8 @@
++/* ReC98
++ * -----
++ * TH02's sound file loader TU, together with its file name buffer
++ */
++
++#include "th02/snd/load.cpp"
++
++char snd_load_fn[PF_FN_LEN];
+diff --git a/th02/vplanset.cpp b/th02/vplanset.cpp
+new file mode 100644
+index 00000000..c0dd661b
+--- /dev/null
++++ b/th02/vplanset.cpp
+@@ -0,0 +1,11 @@
++/* ReC98
++ * -----
++ * TH02's VRAM plane pointer TU, together with the pointers themselves
++ */
++
++#include "th01/hardware/vplanset.cpp"
++
++dots8_t far *VRAM_PLANE_B;
++dots8_t far *VRAM_PLANE_R;
++dots8_t far *VRAM_PLANE_G;
++dots8_t far *VRAM_PLANE_E;
+diff --git a/th02_main.asm b/th02_main.asm
+index fe3a0851..39936c5a 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -187,7 +187,7 @@ include libs/master.lib/super_roll_put_tiny.asm
+ include libs/master.lib/super_convert_tiny.asm
+ include libs/master.lib/super_zoom.asm
+ 
+-	public parfilename, pfint21_pf, pfint21_handle, pferrno, pfkey
++	public pferrno, pfkey
+ 	public mem_AllocID
+ 	extrn PFOPEN:far, PFSTART:far, PFEND:far
+ 
+@@ -598,12 +598,6 @@ include libs/master.lib/vsync[bss].asm
+ include libs/master.lib/mem[bss].asm
+ include libs/master.lib/superpa[bss].asm
+ include libs/master.lib/super_put_rect[bss].asm
+-include th01/hardware/vram_planes[bss].asm
+-include th02/formats/pi_slots[bss].asm
+-include libs/master.lib/pfint21[bss].asm
+-include th02/hardware/input_sense[bss].asm
+-include th02/snd/snd[bss].asm
+-include th02/snd/load[bss].asm
+ 
+ POINTNUM_W = 8
+ POINTNUM_H = 8
+diff --git a/th02_maine.asm b/th02_maine.asm
+index 3280e142..eb17d934 100644
+--- a/th02_maine.asm
++++ b/th02_maine.asm
+@@ -107,7 +107,7 @@ include libs/master.lib/super_entry_pat.asm
+ include libs/master.lib/super_entry_at.asm
+ include libs/master.lib/super_entry_bfnt.asm
+ 
+-	public parfilename, pfint21_pf, pfint21_handle, pferrno, pfkey
++	public pferrno, pfkey
+ 	public mem_AllocID
+ 	extrn PFOPEN:far, PFSTART:far, PFEND:far
+ _TEXT		ends
+@@ -202,12 +202,6 @@ include libs/master.lib/vs[bss].asm
+ include libs/master.lib/vsync[bss].asm
+ include libs/master.lib/mem[bss].asm
+ include libs/master.lib/superpa[bss].asm
+-include th01/hardware/vram_planes[bss].asm
+-include th02/formats/pi_slots[bss].asm
+-include libs/master.lib/pfint21[bss].asm
+-include th02/hardware/input_sense[bss].asm
+-include th02/snd/snd[bss].asm
+-include th02/snd/load[bss].asm
+ extern _resident:dword
+ 
+ 		end
+diff --git a/th02_op.asm b/th02_op.asm
+index a7cbc9ad..17de1cca 100644
+--- a/th02_op.asm
++++ b/th02_op.asm
+@@ -113,7 +113,7 @@ include libs/master.lib/super_put_rect.asm
+ 		db 0
+ include libs/master.lib/super_put.asm
+ 
+-	public parfilename, pfint21_pf, pfint21_handle, pferrno, pfkey
++	public pferrno, pfkey
+ 	public mem_AllocID
+ 	extrn PFOPEN:far, PFSTART:far, PFEND:far
+ _TEXT		ends
+@@ -170,11 +170,5 @@ include libs/master.lib/vsync[bss].asm
+ include libs/master.lib/mem[bss].asm
+ include libs/master.lib/superpa[bss].asm
+ include libs/master.lib/super_put_rect[bss].asm
+-include th01/hardware/vram_planes[bss].asm
+-include th02/formats/pi_slots[bss].asm
+-include libs/master.lib/pfint21[bss].asm
+-include th02/hardware/input_sense[bss].asm
+-include th02/snd/snd[bss].asm
+-include th02/snd/load[bss].asm
+ 
+ 		end

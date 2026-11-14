@@ -3,7 +3,7 @@
 ## State
 
 - OP.EXE, MAIN.EXE, MAINE.EXE and ZUN.COM are identical to the originals as
-  whole files, from a cold build of the patch series (`session5-cold14`).
+  whole files, from a cold build of the patch series (`session5-cold15`).
 - Work lives on branch `th02-recon` of the ReC98 worktree
   `.analysis/work/rec98` and is exported as `patches/rec98/*.patch`
   (`git format-patch b6ba5b0a52..th02-recon`). `scripts/build_th02.py`
@@ -25,11 +25,14 @@ All ZUN C code in MAIN is C++. What remains assembly:
   `th02_*.asm` is master.lib only. Shared TUs are compiled once for every
   binary, so shared data had to sit where it fits all of them
   (`keydelay.cpp`, `frmdely1`'s neighbours `maine022.cpp`/`main02_2.cpp`,
-  pfopen's data in `pf.asm`). All of MAIN's game-specific uninitialized
-  variables are C++ too. `.data?` in `th02_main.asm` keeps master.lib's and
-  five blocks of TUs shared with TH01/TH03-05 (`vram_planes`, `pi_slots`,
-  `input_sense`, `snd`, `load`); ReC98 compiles each shared source once for
-  every game, so they need TH02-only owners first. Unlabeled gaps were real data:
+  pfopen's data in `pf.asm`). All of ZUN's uninitialized variables are
+  C++ too; `.data?` in `th02_*.asm` is master.lib only. The blocks shared
+  with TH01/TH03-05 got TH02-only owner TUs: `th02/vplanset.cpp` (the four
+  plane pointers as separate variables; `planar.h` makes `VRAM_PLANE`
+  `&VRAM_PLANE_B` for TH02, since array subscripts change codegen),
+  `th02/pi_load.cpp`, `th02/input_rs.cpp` (`key_det`, then the `snd_*` flags;
+  in C they would become communals), `th02/snd_ld_2.cpp`, and pfint21's BSS
+  in `pf.asm`. Unlabeled gaps were real data:
   oversized arrays (the bomb TU's 50-element tables) or unused variables
   (`map_unused`, `tile_ring_unused`); TCC aligns neither byte-sized enums
   nor character arrays under `-a2`, but does align structs.
@@ -187,5 +190,8 @@ boundaries, which the target's relocation table records:
 
 ## Next useful actions
 
-1. The five shared BSS blocks above, in all three EXEs (same order in each),
-   if a TH02-only home can be justified.
+
+1. ZUN's three hand-written routines (`pointnum_put()`, `shots_hittest()`,
+   `pfopen()`): TCC with `-k-` omits the frame of a function whose body is
+   only inline asm, so a C++ TU might still reproduce them if the module's
+   `00` pad and relocation order can be matched.
