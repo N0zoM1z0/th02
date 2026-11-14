@@ -1,0 +1,127 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:37:31 +0100
+Subject: [PATCH] Define the bullet TU's uninitialized variables in C++
+
+---
+ th02/main/bullet/bullet.cpp | 27 +++++++++++++++-----------
+ th02/main/bullet/bullet.hpp |  5 +++--
+ th02_main.asm               | 38 -------------------------------------
+ 3 files changed, 19 insertions(+), 51 deletions(-)
+
+diff --git a/th02/main/bullet/bullet.cpp b/th02/main/bullet/bullet.cpp
+index 0daa1933..84d5b528 100644
+--- a/th02/main/bullet/bullet.cpp
++++ b/th02/main/bullet/bullet.cpp
+@@ -82,23 +82,28 @@ uint8_t shot_param_2 = 0x4C;
+ main_patnum_t player_option_patnum = PAT_OPTION_A;
+ int power_overflow = 0;
+ 
+-extern bullet_t bullets[BULLET_COUNT];
++#pragma option -a2
+ 
+-extern screen_x_t screen_left;
+-extern screen_y_t screen_top;
+-extern Subpixel8 rank_base_speed;
++// Uninitialized data, in the original order. The sparks are defined here, as
++// they are initialized together with the bullets.
++bullet_t bullets[BULLET_COUNT];
++spark_t sparks[SPARK_COUNT];
++screen_x_t screen_left;
++screen_y_t screen_top;
++bullet_special_t bullet_special;
++Subpixel8 rank_base_speed;
++uint8_t spark_sprite_interval;
++uint8_t spark_age_max;
+ 
+ // ZUN bloat: Could have been local variables.
+-extern Subpixel near* cur_left;
+-extern Subpixel near* cur_top;
++Subpixel near* cur_left;
++Subpixel near* cur_top;
+ 
+-extern uint8_t rank_base_stack;
+-extern uint8_t stack;
+-extern int8_t easy_slow_skip_cycle;
++uint8_t rank_base_stack;
++int8_t easy_slow_skip_cycle;
++uint8_t stack;
+ // -----
+ 
+-#pragma option -a2
+-
+ void bullets_and_sparks_init(void)
+ {
+ 	int i;
+diff --git a/th02/main/bullet/bullet.hpp b/th02/main/bullet/bullet.hpp
+index 3fd9821e..7b2d6cb0 100644
+--- a/th02/main/bullet/bullet.hpp
++++ b/th02/main/bullet/bullet.hpp
+@@ -6,7 +6,7 @@
+ static const pixel_t BOUNCE_MARGIN = 8; // ZUN quirk
+ 
+ // Global parameters for special motion types.
+-extern struct {
++struct bullet_special_t {
+ 	union {
+ 		Subpixel chase_speed;
+ 		Subpixel gravity_speed;
+@@ -24,7 +24,8 @@ extern struct {
+ 		int16_t turns_max;
+ 		int16_t drift_frames;
+ 	} u3;
+-} bullet_special;
++};
++extern bullet_special_t bullet_special;
+ 
+ enum bullet_group_or_special_motion_t {
+ 	// Not a valid group or special motion, due to a potential ZUN bug in
+diff --git a/th02_main.asm b/th02_main.asm
+index 2319efb4..4ddd24d7 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -861,44 +861,6 @@ bullet_t struc
+ 		db ?
+ bullet_t ends
+ 
+-public _bullets
+-_bullets bullet_t BULLET_COUNT dup(<?>)
+-
+-public _sparks
+-_sparks	spark_t SPARK_COUNT dup(<?>)
+-
+-public _bullet_screen_left, _bullet_screen_top, _bullet_special
+-public _rank_base_speed, _spark_sprite_interval, _spark_age_max
+-public _bullet_cur_left, _bullet_cur_top, _rank_base_stack
+-public _easy_slow_skip_cycle, _bullet_stack
+-_bullet_screen_left	dw ?
+-_bullet_screen_top 	dw ?
+-
+-_bullet_special label word
+-bullet_special_chase_speed label word
+-bullet_special_gravity_speed label word
+-bullet_special_drift_angle label word
+-	dw ?
+-
+-bullet_special_homing_frames label word
+-bullet_special_drift_speed label word
+-	dw ?
+-
+-bullet_special_turns_max label word
+-bullet_special_drift_frames label word
+-	dw ?
+-
+-_rank_base_speed	db ?
+-_spark_sprite_interval	db ?
+-_spark_age_max	db ?
+-	evendata
+-_bullet_cur_left	dw ?
+-_bullet_cur_top 	dw ?
+-_rank_base_stack	db ?
+-_easy_slow_skip_cycle	db ?
+-_bullet_stack	db ?
+-	evendata
+-
+ ITEM_COUNT = 20
+ 
+ IT_POWER = 0
