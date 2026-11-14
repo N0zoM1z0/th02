@@ -1,0 +1,2987 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 21:17:13 +0100
+Subject: [PATCH] [th02/main] Decompile the shot types, shot spawning,
+ invalidation and rendering
+
+Spawning writes [flag]/[age] and [patnum]/[from_option] as single 16-bit
+stores. In shot_b(), the level 8 option shot case falls through into the
+level 9 one.
+---
+ Tupfile.lua               |    1 +
+ th02/main/boss/marisa.cpp |   12 +-
+ th02/main/boss/mima.cpp   |    8 +-
+ th02/main/player/shot.cpp |  704 ++++++++++++++
+ th02/main/player/shot.hpp |   21 +
+ th02/main_01c.cpp         |   35 +-
+ th02_main.asm             | 1869 ++-----------------------------------
+ 7 files changed, 817 insertions(+), 1833 deletions(-)
+ create mode 100644 th02/main/player/shot.cpp
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index 27b9869d..8efd20f6 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -527,6 +527,7 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/main_01a.cpp",
+ 	"th02/main_01b.cpp",
+ 	"th02/main_01c.cpp",
++	"th02/main/player/shot.cpp",
+ 	"th01/vplanset.cpp",
+ 	"th02/pi_load.cpp",
+ 	"th02/vector.cpp",
+diff --git a/th02/main/boss/marisa.cpp b/th02/main/boss/marisa.cpp
+index 4b4a18cf..6e112f3e 100644
+--- a/th02/main/boss/marisa.cpp
++++ b/th02/main/boss/marisa.cpp
+@@ -75,8 +75,8 @@ int pascal near shots_hittest(
+ );
+ void pascal near sub_FFF8(screen_x_t left, screen_y_t top, int frame);
+ 
+-extern int16_t word_205D8;
+-extern int16_t word_205DA;
++extern int16_t shot_target_left;
++extern int16_t shot_target_top;
+ extern int16_t marisa_phase;
+ extern int16_t marisa_bit_state_sum;
+ extern int8_t marisa_bg_col_p;
+@@ -981,11 +981,11 @@ int marisa_update(void)
+ 		marisa_bit_state_sum += marisa_bit_state[i];
+ 	}
+ 	if(marisa_bit_state_sum == 8) {
+-		word_205D8 = (marisa_topleft.x + 40);
+-		word_205DA = (marisa_topleft.y + 40);
++		shot_target_left = (marisa_topleft.x + 40);
++		shot_target_top = (marisa_topleft.y + 40);
+ 	} else {
+-		word_205D8 = -1;
+-		word_205DA = -1;
++		shot_target_left = -1;
++		shot_target_top = -1;
+ 	}
+ 	boss_phase_frame++;
+ 	if((stage_frame & 1) && (!reduce_effects || (stage_frame & 3))) {
+diff --git a/th02/main/boss/mima.cpp b/th02/main/boss/mima.cpp
+index 39b66769..0d1028e5 100644
+--- a/th02/main/boss/mima.cpp
++++ b/th02/main/boss/mima.cpp
+@@ -26,8 +26,8 @@
+ 
+ #include "th02/main/circle.hpp"
+ 
+-extern int16_t word_205D8;
+-extern int16_t word_205DA;
++extern int16_t shot_target_left;
++extern int16_t shot_target_top;
+ extern int16_t left_26C56;
+ extern int16_t word_26C58;
+ extern int16_t left_26C5A;
+@@ -1159,8 +1159,8 @@ int mima_update(void)
+ 	int i;
+ 
+ 	boss_phase_frame++;
+-	word_205D8 = (*boss_left_on_back_page + 72);
+-	word_205DA = (*boss_top_on_back_page + 56);
++	shot_target_left = (*boss_left_on_back_page + 72);
++	shot_target_top = (*boss_top_on_back_page + 56);
+ 	left_26C56 = (*boss_left_on_back_page + 32);
+ 	word_26C58 = (*boss_left_on_back_page + 40);
+ 	left_26C5A = (*boss_left_on_back_page + 64);
+diff --git a/th02/main/player/shot.cpp b/th02/main/player/shot.cpp
+new file mode 100644
+index 00000000..7d315b51
+--- /dev/null
++++ b/th02/main/player/shot.cpp
+@@ -0,0 +1,704 @@
++/* ReC98
++ * -----
++ * Scroll reset, and the player's shot types, of TH02's MAIN.EXE
++ */
++
++#pragma option -zCmain_01__TEXT -zPmain_01 -G -a2
++
++#include "platform.h"
++#include "x86real.h"
++#include "pc98.h"
++#include "libs/master.lib/master.hpp"
++#include "libs/master.lib/pc98_gfx.hpp"
++#include "th02/resident.hpp"
++#include "th02/hardware/pages.hpp"
++#include "th02/math/randring.hpp"
++#include "th02/main/frames.hpp"
++#include "th02/main/scroll.hpp"
++#include "th02/main/player/player.hpp"
++#include "th02/main/player/shot.hpp"
++#include "th02/main/tile/tile.hpp"
++
++extern int scroll_unused;
++extern vram_offset_t scroll_line_vo;
++extern int tile_rows_scrolled;
++extern int16_t tile_row_scrolled;
++extern uint8_t scroll_speed_this_frame;
++extern uint8_t byte_2034E;
++extern uint8_t byte_1E502;
++
++void sub_CA1C(void)
++{
++	scroll_speed = 1;
++	scroll_cycle = 0;
++	scroll_line = 0;
++	scroll_unused = 0;
++	tile_rows_scrolled = 0;
++	scroll_interval = 4;
++	scroll_done = false;
++	byte_2034E = 0;
++	byte_1E502 = 0;
++	scroll_line_vo = 0;
++	tile_row_scrolled = 0;
++	scroll_speed_this_frame = 0;
++}
++
++extern int shot_slot;
++extern int shot_top_new;
++extern uint8_t shot_param_1;
++extern uint8_t shot_param_2;
++extern int8_t shot_max_spread;
++extern uint8_t option_shots_active;
++extern uint8_t shot_c_cycle;
++extern uint8_t shot_frames[SHOT_COUNT];
++extern int8_t shot_option_frames_per_age;
++extern int shot_target_left;
++extern int shot_target_top;
++extern int shot_target_left_unused;
++extern const int SHOT_BIG_HIT_PATNUMS[];
++
++// ZUN set each of these byte pairs with a single 16-bit store.
++#define shot_byte_pair_set(p, field, lo, hi) ( \
++	*reinterpret_cast<uint16_t near *>(&(p)->field) = ((lo) + ((hi) << 8)) \
++)
++
++void pascal near shot_add(int offset_left, unsigned char angle)
++{
++	register shot_t near *p = &shots[shot_slot];
++	int page = (page_back * 2);
++
++	shot_byte_pair_set(p, flag, SF_ALIVE, 0);
++	(&p->pos[0].x)[page] = ((player_topleft.x + offset_left) << 4);
++	(&p->pos[0].y)[page] = shot_top_new;
++	p->velocity.x = ((CosTable8[angle] * 12) >> 4);
++	p->velocity.y = ((SinTable8[angle] * 12) >> 4);
++	shot_byte_pair_set(p, patnum, shot_param_1, false);
++}
++
++void pascal near option_shot_add(
++	int offset_left, int velocity_x, int velocity_y
++)
++{
++	register shot_t near *p = &shots[shot_slot];
++	int page = (page_back * 2);
++
++	shot_byte_pair_set(p, flag, SF_ALIVE, 1);
++	(&p->pos[0].x)[page] = (
++		(*player_option_left_left_on_back_page + offset_left) << 4
++	);
++	(&p->pos[0].y)[page] = (*player_option_left_top_on_back_page << 4);
++	p->velocity.x = velocity_x;
++	p->velocity.y = velocity_y;
++	shot_byte_pair_set(p, patnum, shot_param_2, true);
++}
++
++void near shot_a(void)
++{
++	int i = 0;
++	int last = 0;
++	int tmp = 0;
++
++	shot_top_new = ((player_topleft.y + 32) << 4);
++	for(shot_slot = 0; shot_slot < SHOT_COUNT; shot_slot++) {
++		if(shots[shot_slot].flag != SF_FREE) {
++			continue;
++		}
++		switch(shot_level) {
++		case 0:
++			shot_add(8, 0xC0);
++			break;
++		case 1:
++			shot_add(8, (randring1_next8_and(3) + 0xBE));
++			break;
++		case 2:
++			if(i == 1) {
++				tmp = 16;
++			}
++			shot_add(tmp, (randring1_next8_and(7) + 0xBC));
++			last = 1;
++			break;
++		case 3:
++			if(i == 1) {
++				tmp = 16;
++			}
++			shot_add(tmp, 0xC0);
++			last = 1;
++			break;
++		case 5:
++			tmp = 2;
++			// fallthrough
++		case 4:
++			if(i == 0) {
++				shot_add(8, 0xC0);
++			} else if(i == 1) {
++				shot_add(8, (0xBB - tmp));
++			} else {
++				shot_add(8, (tmp + 0xC5));
++			}
++			last = 2;
++			break;
++		case 6:
++			if(i == 0) {
++				shot_add(0, 0xC0);
++			} else if(i == 1) {
++				shot_add(16, 0xC0);
++			} else {
++				tmp = (randring1_next8_and(0x1F) + 0xB1);
++				shot_add(8, tmp);
++			}
++			last = 3;
++			break;
++		case 7:
++			if(i == 0) {
++				shot_add(0, 0xC0);
++			} else if(i == 1) {
++				shot_add(16, 0xC0);
++			} else if(i == 2) {
++				shot_add(8, 0xB8);
++			} else {
++				shot_add(8, 0xC8);
++			}
++			last = 3;
++			break;
++		case 8:
++			if(i == 0) {
++				tmp = 0xC0;
++			} else if(i == 1) {
++				tmp = 0xB8;
++			} else if(i == 2) {
++				tmp = 0xC8;
++			} else if(i == 3) {
++				tmp = 0xB0;
++			} else {
++				tmp = 0xD0;
++			}
++			shot_add(8, tmp);
++			last = 4;
++			break;
++		case 9:
++			if(i == 0) {
++				shot_add(0, 0xC0);
++			} else if(i == 1) {
++				shot_add(16, 0xC0);
++			} else if(i == 2) {
++				shot_param_1 = 52;
++				tmp = 0xB3;
++				shot_add(8, tmp);
++			} else if(i == 3) {
++				tmp = 0xCD;
++				shot_add(8, tmp);
++			} else if(i == 4) {
++				shot_param_1 = 54;
++				tmp = (0xC0 - shot_max_spread);
++				shot_add(-24, tmp);
++			} else {
++				tmp = (shot_max_spread + 0xC0);
++				shot_add(40, tmp);
++			}
++			last = 5;
++			break;
++		}
++		if(i == last) {
++			break;
++		}
++		i++;
++	}
++	option_shots_active = false;
++}
++
++void near shot_b(void)
++{
++	int i = 0;
++	int last = 0;
++	int tmp = 0;
++	bool main_done = false;
++
++	shot_top_new = ((player_topleft.y + 32) << 4);
++	for(shot_slot = 0; shot_slot < SHOT_COUNT; shot_slot++) {
++		if(shots[shot_slot].flag != SF_FREE) {
++			continue;
++		}
++		if(!main_done) {
++			switch(shot_level) {
++			case 0:
++				shot_add(8, 0xC0);
++				break;
++			case 1:
++				shot_add(8, (randring1_next8_and(3) + 0xBE));
++				break;
++			case 2:
++				shot_add(8, (randring1_next8_and(7) + 0xBC));
++				break;
++			case 3:
++				if(i == 0) {
++					shot_add(0, (randring1_next8_and(7) + 0xBC));
++				} else {
++					shot_add(16, (randring1_next8_and(7) + 0xBC));
++				}
++				last = 1;
++				break;
++			case 4:
++				if(i == 1) {
++					tmp = 16;
++				}
++				shot_add(tmp, 0xC0);
++				last = 1;
++				break;
++			case 5:
++				if(i == 0) {
++					shot_add(0, 0xBE);
++				} else {
++					shot_add(16, 0xC2);
++				}
++				last = 1;
++				break;
++			case 7:
++				tmp = 2;
++				// fallthrough
++			case 6:
++				if(i == 0) {
++					shot_add(8, 0xC0);
++				} else if(i == 1) {
++					shot_add(8, (0xBB - tmp));
++				} else {
++					shot_add(8, (tmp + 0xC5));
++				}
++				last = 2;
++				break;
++			case 8:
++				if(i == 0) {
++					shot_add(0, 0xC0);
++				} else if(i == 1) {
++					shot_add(16, 0xC0);
++				} else {
++					tmp = (randring1_next8_and(0x1F) + 0xB1);
++					shot_add(8, tmp);
++				}
++				last = 3;
++				break;
++			case 9:
++				if(i == 0) {
++					shot_add(0, 0xC0);
++				} else if(i == 1) {
++					shot_add(16, 0xC0);
++				} else if(i == 2) {
++					shot_param_1 = 50;
++					if(shot_target_top > 0) {
++						tmp = iatan2(
++							(shot_target_top - player_topleft.y - 32),
++							(shot_target_left - player_topleft.x)
++						);
++						tmp += (randring1_next8_and(7) - 3);
++					} else {
++						tmp = 0xB7;
++					}
++					shot_add(0, tmp);
++				} else if(i == 3) {
++					if(shot_target_top > 0) {
++						tmp = iatan2(
++							(shot_target_top - player_topleft.y - 32),
++							(shot_target_left - player_topleft.x - 16)
++						);
++						tmp += (randring1_next8_and(7) - 3);
++					} else {
++						tmp = 0xC9;
++					}
++					shot_add(16, tmp);
++				}
++				last = 3;
++				break;
++			}
++			if(i == last) {
++				main_done = true;
++				i = 0;
++				continue;
++			}
++		} else {
++			if(shot_level < 2) {
++				return;
++			}
++			if(shot_level == SHOT_LEVEL_MAX) {
++				shot_target_left_unused = shot_target_left;
++			} else {
++				shot_target_left_unused = -1;
++			}
++			if(option_shots_active) {
++				return;
++			}
++			switch(shot_level) {
++			case 2:
++			case 3:
++			case 4:
++				option_shot_add((i * 48), 0, -4);
++				last = 1;
++				break;
++			case 5:
++			case 6:
++			case 7:
++				if(i == 0) {
++					option_shot_add(0, 0, -16);
++				} else if(i == 1) {
++					option_shot_add(48, 0, -16);
++				} else if(i == 2) {
++					option_shot_add(-8, -3, -6);
++				} else {
++					option_shot_add(56, 3, -6);
++				}
++				last = 3;
++				break;
++			case 8:
++				if(i == 0) {
++					option_shot_add(0, 0, -34);
++				} else if(i == 1) {
++					option_shot_add(48, 0, -34);
++				} else if(i == 2) {
++					option_shot_add(-8, -5, -28);
++				} else if(i == 3) {
++					option_shot_add(56, 5, -28);
++				} else if(i == 4) {
++					option_shot_add(-16, -10, -24);
++				} else {
++					option_shot_add(64, 10, -24);
++				}
++				last = 5;
++				// ZUN bug: Missing `break`. The shot is immediately replaced by
++				// the respective level 9 one.
++			case 9:
++				if(i == 0) {
++					option_shot_add(0, 0, -54);
++				} else if(i == 1) {
++					option_shot_add(48, 0, -54);
++				} else if(i == 2) {
++					option_shot_add(-8, -16, -50);
++				} else if(i == 3) {
++					option_shot_add(56, 16, -50);
++				} else if(i == 4) {
++					option_shot_add(-16, -32, -40);
++				} else {
++					option_shot_add(64, 32, -40);
++				}
++				last = 5;
++				break;
++			}
++			if(i == last) {
++				option_shots_active = true;
++				return;
++			}
++		}
++		i++;
++	}
++}
++
++void near shot_c(void)
++{
++	int i = 0;
++	int last;
++	int tmp = 0;
++	bool main_done;
++
++	last = 0;
++	main_done = false;
++
++	shot_c_cycle++;
++	shot_top_new = ((player_topleft.y + 32) << 4);
++	if(shot_level >= 2) {
++		shot_param_1 = 124;
++	}
++	for(shot_slot = 0; shot_slot < SHOT_COUNT; shot_slot++) {
++		if(shots[shot_slot].flag != SF_FREE) {
++			continue;
++		}
++		if(!main_done) {
++			switch(shot_level) {
++			case 0:
++			case 1:
++			case 2:
++				shot_add(8, 0xC0);
++				break;
++			case 3:
++			case 4:
++			case 5:
++				shot_add(8, (randring1_next8_and(3) + 0xBE));
++				break;
++			case 6:
++			case 7:
++			case 8:
++				shot_add(8, (randring1_next8_and(7) + 0xBC));
++				break;
++			case 9:
++				if(i == 0) {
++					shot_add(8, 0xC0);
++				} else {
++					if(i == 1) {
++						tmp = -16;
++						shot_param_1 = 49;
++					} else if(i == 2) {
++						tmp = 32;
++					} else if(i == 3) {
++						tmp = -16;
++					} else if(i == 4) {
++						tmp = 32;
++					}
++					shot_add(tmp, 0xC0);
++					if(i >= 3) {
++						shots[shot_slot].pos[page_back].y -= (16 << 4);
++					}
++				}
++				if((shot_c_cycle % 3) == 0) {
++					last = 4;
++				} else {
++					last = 0;
++				}
++				break;
++			}
++			if(i == last) {
++				main_done = true;
++				i = 0;
++				continue;
++			}
++		} else {
++			if(shot_level < 2) {
++				return;
++			}
++			if(shot_level < 3) {
++				if(option_shots_active) {
++					return;
++				}
++			} else if(shot_level < 4) {
++				if(shot_c_cycle % 5) {
++					return;
++				}
++			} else if(shot_level < 6) {
++				if(shot_c_cycle & 3) {
++					return;
++				}
++			} else if(shot_level < SHOT_LEVEL_MAX) {
++				if(shot_c_cycle % 3) {
++					return;
++				}
++			} else {
++				if(shot_c_cycle & 1) {
++					return;
++				}
++			}
++			switch(shot_level) {
++			case 2:
++			case 3:
++				option_shot_add((i * 48), 0, -4);
++				last = 1;
++				break;
++			case 4:
++				option_shot_add((i * 48), 0, -16);
++				last = 1;
++				break;
++			case 5:
++				if(i == 0) {
++					option_shot_add(0, 4, -16);
++				} else if(i == 1) {
++					option_shot_add(48, -4, -16);
++				} else if(i == 2) {
++					option_shot_add(-8, 0, -16);
++				} else {
++					option_shot_add(56, 0, -16);
++				}
++				last = 3;
++				break;
++			case 6:
++				if(i == 0) {
++					option_shot_add(0, 6, -24);
++				} else if(i == 1) {
++					option_shot_add(48, -6, -24);
++				} else if(i == 2) {
++					option_shot_add(-8, 0, -24);
++				} else {
++					option_shot_add(56, 0, -24);
++				}
++				last = 3;
++				break;
++			case 7:
++				if(i == 0) {
++					option_shot_add(0, 6, -26);
++				} else if(i == 1) {
++					option_shot_add(48, -6, -26);
++				} else if(i == 2) {
++					option_shot_add(-8, 0, -26);
++				} else {
++					option_shot_add(56, 0, -26);
++				}
++				last = 3;
++				break;
++			case 8:
++				if(i == 0) {
++					option_shot_add(0, 10, -48);
++				} else if(i == 1) {
++					option_shot_add(48, -10, -48);
++				} else if(i == 2) {
++					option_shot_add(-8, -4, -48);
++				} else {
++					option_shot_add(56, 4, -48);
++				}
++				last = 3;
++				break;
++			case 9:
++				if(i == 0) {
++					option_shot_add(0, -10, -160);
++				} else if(i == 1) {
++					option_shot_add(48, 10, -160);
++				} else if(i == 2) {
++					option_shot_add(-8, 20, -140);
++				} else if(i == 3) {
++					option_shot_add(56, -20, -140);
++				} else if(i == 4) {
++					option_shot_add(-16, -7, -120);
++				} else {
++					option_shot_add(64, 7, -120);
++				}
++				if((shot_c_cycle & 3) == 0) {
++					last = 5;
++				} else {
++					last = 3;
++				}
++				break;
++			}
++			if(i == last) {
++				option_shots_active = true;
++				return;
++			}
++		}
++		i++;
++	}
++}
++
++void shots_clear(void)
++{
++	int i;
++	for(i = 0; i < SHOT_COUNT; i++) {
++		shots[i].flag = SF_FREE;
++	}
++}
++
++void near shots_invalidate(void)
++{
++	screen_x_t left;
++	uint8_t option_shots_alive = 0;
++	register shot_t near *p = shots;
++	register int i = 0;
++
++	for(; i < SHOT_COUNT; i++, p++) {
++		if(p->flag == SF_FREE) {
++			continue;
++		}
++		if(!reduce_effects || (page_back == (i & 1))) {
++			left = (p->pos[page_back].x >> 4);
++			if((p->patnum < 124) || (p->age == 0)) {
++				tiles_invalidate_rect(
++					left, (p->pos[page_back].y >> 4), 16, 16
++				);
++			} else {
++				tiles_invalidate_rect(
++					left, (p->pos[page_back].y >> 4), 32, 32
++				);
++			}
++		}
++		if(p->flag == SF_REMOVE) {
++			p->flag = SF_FREE;
++			continue;
++		}
++		p->pos[page_back].x = shots[i].pos[page_front].x;
++		p->pos[page_back].y = shots[i].pos[page_front].y;
++		if(p->from_option) {
++			option_shots_alive++;
++		}
++	}
++	if(!option_shots_alive) {
++		option_shots_active = false;
++	}
++}
++
++void near shots_update_and_render(void)
++{
++	int i;
++	screen_x_t left;
++	int near *pos_x;
++	int near *pos_y;
++	uint8_t skip;
++	int page_offset;
++	register shot_t near *p;
++	register vram_y_t top;
++
++	skip = (reduce_effects << page_back);
++	page_offset = (page_back * sizeof(screen_point_t));
++	for(p = shots, i = 0; i < SHOT_COUNT; i++, skip ^= 3, p++) {
++		if(p->flag != SF_ALIVE) {
++			continue;
++		}
++		pos_x = reinterpret_cast<int near *>(
++			reinterpret_cast<char near *>(&p->pos[0].x) + page_offset
++		);
++		pos_y = reinterpret_cast<int near *>(
++			reinterpret_cast<char near *>(&p->pos[0].y) + page_offset
++		);
++		*pos_x += p->velocity.x;
++		*pos_y += p->velocity.y;
++		top = (*pos_y >> 4);
++		left = (*pos_x >> 4);
++		if(
++			(*pos_x <= (16 << 4)) ||
++			(*pos_x >= (418 << 4)) ||
++			(top > 384) ||
++			(top < 8)
++		) {
++			p->flag = SF_REMOVE;
++			continue;
++		}
++		top += scroll_line;
++		if(top >= RES_Y) {
++			top -= RES_Y;
++		}
++		if(!p->from_option) {
++			shot_frames[i]++;
++			if(p->age == 0) {
++				if(skip != 2) {
++					int patnum = p->patnum;
++					if(patnum >= 50) {
++						patnum += (shot_frames[i] & 1);
++					}
++					super_roll_put_tiny(left, top, patnum);
++				}
++			} else {
++				if(p->age > 5) {
++					p->flag = SF_REMOVE;
++					continue;
++				}
++				if(skip != 2) {
++					if(p->patnum < 124) {
++						super_roll_put_tiny(left, top, (p->age + 74));
++					} else {
++						super_roll_put(left, top, SHOT_BIG_HIT_PATNUMS[p->age]);
++					}
++				}
++				if((stage_frame & 3) == 0) {
++					++p->age;
++				}
++			}
++		} else {
++			if(p->age > 1) {
++				if((stage_frame % shot_option_frames_per_age) == 0) {
++					++p->age;
++					if(p->age > 4) {
++						p->flag = SF_REMOVE;
++						continue;
++					}
++				}
++				if(stage_frame & 1) {
++					p->velocity.y >>= 1;
++				}
++			} else if(p->patnum != 59) {
++				p->velocity.y -= 4;
++			}
++			if(skip != 2) {
++				super_roll_put_tiny(left, top, (p->patnum + p->age));
++			}
++		}
++	}
++}
+diff --git a/th02/main/player/shot.hpp b/th02/main/player/shot.hpp
+index 6b0b29ac..e5b13388 100644
+--- a/th02/main/player/shot.hpp
++++ b/th02/main/player/shot.hpp
+@@ -1 +1,22 @@
++#include "pc98.h"
++
++enum shot_flag_t {
++	SF_FREE = 0,
++	SF_ALIVE = 1,
++	SF_REMOVE = 2, // Unblitted on the next frame, then freed
++};
++
++struct shot_t {
++	uint8_t flag;
++	uint8_t age;
++	screen_point_t pos[PAGE_COUNT]; // in subpixels, one per VRAM page
++	screen_point_t velocity; // in subpixels
++	uint8_t patnum;
++	bool from_option;
++};
++
++static const int SHOT_COUNT = 38;
++
++extern shot_t shots[SHOT_COUNT];
++
+ void near shots_update_and_render(void);
+diff --git a/th02/main_01c.cpp b/th02/main_01c.cpp
+index fbf69377..bc39a529 100644
+--- a/th02/main_01c.cpp
++++ b/th02/main_01c.cpp
+@@ -29,6 +29,7 @@
+ #include "th02/main/hud/overlay.hpp"
+ #include "th02/main/item/item.hpp"
+ #include "th02/main/player/player.hpp"
++#include "th02/main/player/shot.hpp"
+ #include "th02/main/stage/stage.hpp"
+ #include "th02/main/tile/tile.hpp"
+ 
+@@ -173,23 +174,15 @@ int GameExecl(char *binary_fn)
+ 	return execl(binary_fn, binary_fn, NULL);
+ }
+ 
+-struct shot_t {
+-	uint8_t flag;
+-	int8_t unknown[15];
+-};
+-
+-static const int SHOT_COUNT = 38;
+-
+-extern shot_t shots[SHOT_COUNT];
+-extern uint8_t byte_205DE;
++extern uint8_t option_shots_active;
+ extern uint8_t byte_205DF;
+ extern uint8_t byte_205E0;
+ extern uint8_t stage_miss_count;
+-extern int word_205D8;
+-extern int word_205DA;
+-extern int word_205DC;
++extern int shot_target_left;
++extern int shot_target_top;
++extern int shot_target_left_unused;
+ extern uint8_t byte_20611;
+-extern uint8_t byte_1E518;
++extern int8_t shot_option_frames_per_age;
+ extern int8_t playchar_speed_aligned_x;
+ extern int8_t playchar_speed_aligned_y;
+ extern int8_t playchar_speed_diagonal_x;
+@@ -206,9 +199,9 @@ void near sub_C5B0(void)
+ {
+ 	int i;
+ 	for(i = 0; i < SHOT_COUNT; i++) {
+-		shots[i].flag = 0;
++		shots[i].flag = SF_FREE;
+ 	}
+-	byte_205DE = 0;
++	option_shots_active = 0;
+ 	player_invincibility_time = 0;
+ 	player_invincible_via_bomb = false;
+ 	quit = false;
+@@ -219,9 +212,9 @@ void near sub_C5B0(void)
+ 	player_is_hit = false;
+ 	miss_active = false;
+ 	player_option_patnum = PAT_OPTION_A;
+-	word_205D8 = -1;
+-	word_205DC = -1;
+-	word_205DA = -1;
++	shot_target_left = -1;
++	shot_target_left_unused = -1;
++	shot_target_top = -1;
+ 	shot_max_spread = 0;
+ 	byte_20611 = 0;
+ 	switch(resident->shottype) {
+@@ -249,7 +242,7 @@ void near sub_C5B0(void)
+ 		playchar_speed_aligned_y = 3;
+ 		playchar_speed_diagonal_x = 3;
+ 		playchar_speed_diagonal_y = 3;
+-		byte_1E518 = 3;
++		shot_option_frames_per_age = 3;
+ 		shot_max_param_1 = 125;
+ 		shot_max_param_2 = 59;
+ 		player_option_patnum += 2;
+@@ -259,14 +252,14 @@ void near sub_C5B0(void)
+ 
+ #pragma option -G
+ 
+-void near sub_D38F(void);
++void near shots_invalidate(void);
+ 
+ void near player_invalidate(void)
+ {
+ 	int unused = 2;
+ 	screen_x_t option_left;
+ 
+-	sub_D38F();
++	shots_invalidate();
+ 	player_left_on_back_page = &player_left_on_page[page_back];
+ 	player_top_on_back_page = &player_top_on_page[page_back];
+ 	player_option_left_left_on_back_page = (
+diff --git a/th02_main.asm b/th02_main.asm
+index f134b54c..a3758218 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -745,1745 +745,13 @@ include th02/main/pointnum/num_put.asm
+ 
+ ; Attributes: bp-based frame
+ 
+-public @sub_CA1C$qv
+-@sub_CA1C$qv	proc far
+-		push	bp
+-		mov	bp, sp
+-		mov	_scroll_speed, 1
+-		mov	_scroll_cycle, 0
+-		mov	_scroll_line, 0
+-		mov	_scroll_unused, 0
+-		mov	_tile_rows_scrolled, 0
+-		mov	_scroll_interval, 4
+-		mov	_scroll_done, 0
+-		mov	byte_2034E, 0
+-		mov	byte_1E502, 0
+-		mov	_scroll_line_vo, 0
+-		mov	_tile_row_scrolled, 0
+-		mov	_scroll_speed_this_frame, 0
+-		pop	bp
+-		retf
+-@sub_CA1C$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sub_CA62	proc near
+-
+-@@angle		= byte ptr  4
+-arg_2		= word ptr  6
+-
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		mov	dl, [bp+@@angle]
+-		mov	ax, word_205E2
+-		shl	ax, 4
+-		add	ax, 2908h
+-		mov	si, ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	cx, ax
+-		mov	word ptr [si], 1
+-		mov	ax, _player_topleft.x
+-		add	ax, [bp+arg_2]
+-		shl	ax, 4
+-		mov	bx, cx
+-		add	bx, bx
+-		mov	[bx+si+2], ax
+-		mov	bx, cx
+-		add	bx, bx
+-		mov	ax, word_205E4
+-		mov	[bx+si+4], ax
+-		mov	al, dl
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _CosTable8[bx]
+-		imul	ax, 0Ch
+-		sar	ax, 4
+-		mov	[si+0Ah], ax
+-		mov	al, dl
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _SinTable8[bx]
+-		imul	ax, 0Ch
+-		sar	ax, 4
+-		mov	[si+0Ch], ax
+-		mov	al, _shot_param_1
+-		mov	ah, 0
+-		mov	[si+0Eh], ax
+-		pop	si
+-		pop	bp
+-		retn	4
+-sub_CA62	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sub_CAD2	proc near
+-
+-arg_0		= word ptr  4
+-arg_2		= word ptr  6
+-arg_4		= word ptr  8
+-
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		mov	ax, word_205E2
+-		shl	ax, 4
+-		add	ax, 2908h
+-		mov	si, ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	dx, ax
+-		mov	word ptr [si], 101h
+-		mov	bx, _player_option_left_left_on_back_
+-		mov	ax, [bx]
+-		add	ax, [bp+arg_4]
+-		shl	ax, 4
+-		mov	bx, dx
+-		add	bx, bx
+-		mov	[bx+si+2], ax
+-		mov	bx, _player_option_left_top_on_back_p
+-		mov	ax, [bx]
+-		shl	ax, 4
+-		mov	bx, dx
+-		add	bx, bx
+-		mov	[bx+si+4], ax
+-		mov	ax, [bp+arg_2]
+-		mov	[si+0Ah], ax
+-		mov	ax, [bp+arg_0]
+-		mov	[si+0Ch], ax
+-		mov	al, _shot_param_2
+-		mov	ah, 0
+-		add	ax, 100h
+-		mov	[si+0Eh], ax
+-		pop	si
+-		pop	bp
+-		retn	6
+-sub_CAD2	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @shot_a$qv
+-@shot_a$qv	proc near
+-
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 2
+-		push	si
+-		push	di
+-		xor	si, si
+-		xor	di, di
+-		mov	[bp+var_2], 0
+-		mov	ax, _player_topleft.y
+-		add	ax, 32
+-		shl	ax, 4
+-		mov	word_205E4, ax
+-		mov	word_205E2, 0
+-		jmp	loc_CD04
+-; ---------------------------------------------------------------------------
+-
+-loc_CB53:
+-		mov	bx, word_205E2
+-		shl	bx, 4
+-		cmp	byte ptr [bx+2908h], 0
+-		jnz	loc_CD00
+-		mov	al, _shot_level
+-		mov	ah, 0
+-		mov	bx, ax
+-		cmp	bx, SHOT_LEVEL_MAX
+-		ja	loc_CCFB
+-		add	bx, bx
+-		jmp	cs:off_CD16[bx]
+-
+-loc_CB78:
+-		push	8
+-		push	0C0h
+-		call	sub_CA62
+-		jmp	loc_CCFB
+-; ---------------------------------------------------------------------------
+-
+-loc_CB83:
+-		push	8
+-		push	3
+-		call	@randring1_next8_and$quc
+-		add	al, 0BEh
+-		push	ax
+-		call	sub_CA62
+-		jmp	loc_CCFB
+-; ---------------------------------------------------------------------------
+-
+-loc_CB93:
+-		cmp	si, 1
+-		jnz	short loc_CB9D
+-		mov	[bp+var_2], 10h
+-
+-loc_CB9D:
+-		push	[bp+var_2]
+-		push	7
+-		call	@randring1_next8_and$quc
+-		add	al, 0BCh
+-		push	ax
+-
+-loc_CBA8:
+-		call	sub_CA62
+-		mov	di, 1
+-		jmp	loc_CCFB
+-; ---------------------------------------------------------------------------
+-
+-loc_CBB1:
+-		cmp	si, 1
+-		jnz	short loc_CBBB
+-		mov	[bp+var_2], 10h
+-
+-loc_CBBB:
+-		push	[bp+var_2]
+-		push	0C0h
+-		jmp	short loc_CBA8
+-; ---------------------------------------------------------------------------
+-
+-loc_CBC3:
+-		mov	[bp+var_2], 2
+-
+-loc_CBC8:
+-		or	si, si
+-		jnz	short loc_CBD3
+-		push	8
+-		push	0C0h
+-		jmp	short loc_CBE9
+-; ---------------------------------------------------------------------------
+-
+-loc_CBD3:
+-		cmp	si, 1
+-		jnz	short loc_CBE1
+-		push	8
+-		mov	al, 0BBh
+-		sub	al, byte ptr [bp+var_2]
+-		jmp	short loc_CBE8
+-; ---------------------------------------------------------------------------
+-
+-loc_CBE1:
+-		push	8
+-		mov	al, byte ptr [bp+var_2]
+-		add	al, 0C5h
+-
+-loc_CBE8:
+-		push	ax
+-
+-loc_CBE9:
+-		call	sub_CA62
+-		mov	di, 2
+-		jmp	loc_CCFB
+-; ---------------------------------------------------------------------------
+-
+-loc_CBF2:
+-		or	si, si
+-		jnz	short loc_CBFD
+-		push	0
+-		push	0C0h
+-		jmp	short loc_CC19
+-; ---------------------------------------------------------------------------
+-
+-loc_CBFD:
+-		cmp	si, 1
+-		jnz	short loc_CC09
+-		push	10h
+-		push	0C0h
+-		jmp	short loc_CC19
+-; ---------------------------------------------------------------------------
+-
+-loc_CC09:
+-		push	1Fh
+-		call	@randring1_next8_and$quc
+-		mov	ah, 0
+-		add	ax, 0B1h
+-		mov	[bp+var_2], ax
+-		push	8
+-		push	ax
+-
+-loc_CC19:
+-		call	sub_CA62
+-		mov	di, 3
+-		jmp	loc_CCFB
+-; ---------------------------------------------------------------------------
+-
+-loc_CC22:
+-		or	si, si
+-		jnz	short loc_CC2D
+-		push	0
+-		push	0C0h
+-		jmp	short loc_CC4A
+-; ---------------------------------------------------------------------------
+-
+-loc_CC2D:
+-		cmp	si, 1
+-		jnz	short loc_CC39
+-		push	10h
+-		push	0C0h
+-		jmp	short loc_CC4A
+-; ---------------------------------------------------------------------------
+-
+-loc_CC39:
+-		cmp	si, 2
+-		jnz	short loc_CC45
+-		push	8
+-		push	0B8h
+-		jmp	short loc_CC4A
+-; ---------------------------------------------------------------------------
+-
+-loc_CC45:
+-		push	8
+-		push	0C8h
+-
+-loc_CC4A:
+-		call	sub_CA62
+-		mov	di, 3
+-		jmp	loc_CCFB
+-; ---------------------------------------------------------------------------
+-
+-loc_CC53:
+-		or	si, si
+-		jnz	short loc_CC5E
+-		mov	[bp+var_2], 0C0h
+-		jmp	short loc_CC87
+-; ---------------------------------------------------------------------------
+-
+-loc_CC5E:
+-		cmp	si, 1
+-		jnz	short loc_CC6A
+-		mov	[bp+var_2], 0B8h
+-		jmp	short loc_CC87
+-; ---------------------------------------------------------------------------
+-
+-loc_CC6A:
+-		cmp	si, 2
+-		jnz	short loc_CC76
+-		mov	[bp+var_2], 0C8h
+-		jmp	short loc_CC87
+-; ---------------------------------------------------------------------------
+-
+-loc_CC76:
+-		cmp	si, 3
+-		jnz	short loc_CC82
+-		mov	[bp+var_2], 0B0h ; '°'
+-		jmp	short loc_CC87
+-; ---------------------------------------------------------------------------
+-
+-loc_CC82:
+-		mov	[bp+var_2], 0D0h
+-
+-loc_CC87:
+-		push	8
+-		push	[bp+var_2]
+-		call	sub_CA62
+-		mov	di, 4
+-		jmp	short loc_CCFB
+-; ---------------------------------------------------------------------------
+-
+-loc_CC94:
+-		or	si, si
+-		jnz	short loc_CC9F
+-		push	0
+-		push	0C0h
+-		jmp	short loc_CCF5
+-; ---------------------------------------------------------------------------
+-
+-loc_CC9F:
+-		cmp	si, 1
+-		jnz	short loc_CCAB
+-		push	10h
+-		push	0C0h
+-		jmp	short loc_CCF5
+-; ---------------------------------------------------------------------------
+-
+-loc_CCAB:
+-		cmp	si, 2
+-		jnz	short loc_CCBE
+-		mov	_shot_param_1, 34h	; '4'
+-		mov	[bp+var_2], 0B3h
+-		push	8
+-		jmp	short loc_CCF2
+-; ---------------------------------------------------------------------------
+-
+-loc_CCBE:
+-		cmp	si, 3
+-		jnz	short loc_CCCC
+-		mov	[bp+var_2], 0CDh
+-		push	8
+-		jmp	short loc_CCF2
+-; ---------------------------------------------------------------------------
+-
+-loc_CCCC:
+-		cmp	si, 4
+-		jnz	short loc_CCE6
+-		mov	_shot_param_1, 36h	; '6'
+-		mov	al, _shot_max_spread
+-		cbw
+-		mov	dx, 0C0h
+-		sub	dx, ax
+-		mov	[bp+var_2], dx
+-		push	0FFE8h
+-		jmp	short loc_CCF2
+-; ---------------------------------------------------------------------------
+-
+-loc_CCE6:
+-		mov	al, _shot_max_spread
+-		cbw
+-		add	ax, 0C0h
+-		mov	[bp+var_2], ax
+-		push	28h ; '('
+-
+-loc_CCF2:
+-		push	[bp+var_2]
+-
+-loc_CCF5:
+-		call	sub_CA62
+-		mov	di, 5
+-
+-loc_CCFB:
+-		cmp	si, di
+-		jz	short loc_CD0D
+-		inc	si
+-
+-loc_CD00:
+-		inc	word_205E2
+-
+-loc_CD04:
+-		cmp	word_205E2, 26h	; '&'
+-		jl	loc_CB53
+-
+-loc_CD0D:
+-		mov	_byte_205DE, 0
+-		pop	di
+-		pop	si
+-		leave
+-		retn
+-@shot_a$qv	endp
+-
+-; ---------------------------------------------------------------------------
+-off_CD16	dw offset loc_CB78
+-		dw offset loc_CB83
+-		dw offset loc_CB93
+-		dw offset loc_CBB1
+-		dw offset loc_CBC8
+-		dw offset loc_CBC3
+-		dw offset loc_CBF2
+-		dw offset loc_CC22
+-		dw offset loc_CC53
+-		dw offset loc_CC94
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @shot_b$qv
+-@shot_b$qv	proc near
+-
+-var_3		= byte ptr -3
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		push	si
+-		push	di
+-		xor	si, si
+-		xor	di, di
+-		mov	[bp+var_2], 0
+-		mov	[bp+var_3], 0
+-		mov	ax, _player_topleft.y
+-		add	ax, 32
+-		shl	ax, 4
+-		mov	word_205E4, ax
+-		mov	word_205E2, 0
+-		jmp	loc_D039
+-; ---------------------------------------------------------------------------
+-
+-loc_CD54:
+-		mov	bx, word_205E2
+-		shl	bx, 4
+-		cmp	byte ptr [bx+2908h], 0
+-		jnz	loc_D035
+-		cmp	[bp+var_3], 0
+-		jnz	loc_CEF7
+-		mov	al, _shot_level
+-		mov	ah, 0
+-		mov	bx, ax
+-		cmp	bx, SHOT_LEVEL_MAX
+-		ja	loc_CEE8
+-		add	bx, bx
+-		jmp	cs:off_D057[bx]
+-
+-loc_CD81:
+-		push	8
+-		push	0C0h
+-		call	sub_CA62
+-		jmp	loc_CEE8
+-; ---------------------------------------------------------------------------
+-
+-loc_CD8C:
+-		push	8
+-		push	3
+-		call	@randring1_next8_and$quc
+-		add	al, 0BEh
+-		jmp	short loc_CDA0
+-; ---------------------------------------------------------------------------
+-
+-loc_CD97:
+-		push	8
+-		push	7
+-		call	@randring1_next8_and$quc
+-		add	al, 0BCh
+-
+-loc_CDA0:
+-		push	ax
+-		call	sub_CA62
+-		jmp	loc_CEE8
+-; ---------------------------------------------------------------------------
+-
+-loc_CDA7:
+-		or	si, si
+-		jnz	short loc_CDAF
+-		push	0
+-		jmp	short loc_CDB1
+-; ---------------------------------------------------------------------------
+-
+-loc_CDAF:
+-		push	10h
+-
+-loc_CDB1:
+-		push	7
+-		call	@randring1_next8_and$quc
+-		add	al, 0BCh
+-		push	ax
+-		call	sub_CA62
+-		mov	di, 1
+-		jmp	loc_CEE8
+-; ---------------------------------------------------------------------------
+-
+-loc_CDC2:
+-		cmp	si, 1
+-		jnz	short loc_CDCC
+-		mov	[bp+var_2], 10h
+-
+-loc_CDCC:
+-		push	[bp+var_2]
+-		push	0C0h
+-		call	sub_CA62
+-		mov	di, 1
+-		jmp	loc_CEE8
+-; ---------------------------------------------------------------------------
+-
+-loc_CDDB:
+-		or	si, si
+-		jnz	short loc_CDE6
+-		push	0
+-		push	0BEh
+-		jmp	short loc_CDEB
+-; ---------------------------------------------------------------------------
+-
+-loc_CDE6:
+-		push	10h
+-		push	0C2h
+-
+-loc_CDEB:
+-		call	sub_CA62
+-		mov	di, 1
+-		jmp	loc_CEE8
+-; ---------------------------------------------------------------------------
+-
+-loc_CDF4:
+-		mov	[bp+var_2], 2
+-
+-loc_CDF9:
+-		or	si, si
+-		jnz	short loc_CE04
+-		push	8
+-		push	0C0h
+-		jmp	short loc_CE1A
+-; ---------------------------------------------------------------------------
+-
+-loc_CE04:
+-		cmp	si, 1
+-		jnz	short loc_CE12
+-		push	8
+-		mov	al, 0BBh
+-		sub	al, byte ptr [bp+var_2]
+-		jmp	short loc_CE19
+-; ---------------------------------------------------------------------------
+-
+-loc_CE12:
+-		push	8
+-		mov	al, byte ptr [bp+var_2]
+-		add	al, 0C5h
+-
+-loc_CE19:
+-		push	ax
+-
+-loc_CE1A:
+-		call	sub_CA62
+-		mov	di, 2
+-		jmp	loc_CEE8
+-; ---------------------------------------------------------------------------
+-
+-loc_CE23:
+-		or	si, si
+-		jnz	short loc_CE29
+-		jmp	short loc_CE46
+-; ---------------------------------------------------------------------------
+-
+-loc_CE29:
+-		cmp	si, 1
+-		jnz	short loc_CE30
+-		jmp	short loc_CE53
+-; ---------------------------------------------------------------------------
+-
+-loc_CE30:
+-		push	1Fh
+-		call	@randring1_next8_and$quc
+-		mov	ah, 0
+-		add	ax, 0B1h
+-		mov	[bp+var_2], ax
+-		push	8
+-		jmp	loc_CEDF
+-; ---------------------------------------------------------------------------
+-
+-loc_CE42:
+-		or	si, si
+-		jnz	short loc_CE4E
+-
+-loc_CE46:
+-		push	0
+-		push	0C0h
+-		jmp	loc_CEE2
+-; ---------------------------------------------------------------------------
+-
+-loc_CE4E:
+-		cmp	si, 1
+-		jnz	short loc_CE5B
+-
+-loc_CE53:
+-		push	10h
+-		push	0C0h
+-		jmp	loc_CEE2
+-; ---------------------------------------------------------------------------
+-
+-loc_CE5B:
+-		cmp	si, 2
+-		jnz	short loc_CE9F
+-		mov	_shot_param_1, 32h	; '2'
+-		cmp	_word_205DA, 0
+-		jle	short loc_CE96
+-		mov	ax, _word_205DA
+-		sub	ax, _player_topleft.y
+-		add	ax, -32
+-		push	ax
+-		mov	ax, _word_205D8
+-		sub	ax, _player_topleft.x
+-		push	ax
+-		call	iatan2
+-		mov	[bp+var_2], ax
+-		push	7
+-		call	@randring1_next8_and$quc
+-		mov	ah, 0
+-		add	ax, 0FFFDh
+-		add	[bp+var_2], ax
+-		jmp	short loc_CE9B
+-; ---------------------------------------------------------------------------
+-
+-loc_CE96:
+-		mov	[bp+var_2], 0B7h
+-
+-loc_CE9B:
+-		push	0
+-		jmp	short loc_CEDF
+-; ---------------------------------------------------------------------------
+-
+-loc_CE9F:
+-		cmp	si, 3
+-		jnz	short loc_CEE5
+-		cmp	_word_205DA, 0
+-		jle	short loc_CED8
+-		mov	ax, _word_205DA
+-		sub	ax, _player_topleft.y
+-		add	ax, -32
+-		push	ax
+-		mov	ax, _word_205D8
+-		sub	ax, _player_topleft.x
+-		add	ax, -16
+-		push	ax
+-		call	iatan2
+-		mov	[bp+var_2], ax
+-		push	7
+-		call	@randring1_next8_and$quc
+-		mov	ah, 0
+-		add	ax, 0FFFDh
+-		add	[bp+var_2], ax
+-		jmp	short loc_CEDD
+-; ---------------------------------------------------------------------------
+-
+-loc_CED8:
+-		mov	[bp+var_2], 0C9h
+-
+-loc_CEDD:
+-		push	10h
+-
+-loc_CEDF:
+-		push	[bp+var_2]
+-
+-loc_CEE2:
+-		call	sub_CA62
+-
+-loc_CEE5:
+-		mov	di, 3
+-
+-loc_CEE8:
+-		cmp	si, di
+-		jnz	loc_D034
+-		mov	[bp+var_3], 1
+-		xor	si, si
+-		jmp	loc_D035
+-; ---------------------------------------------------------------------------
+-
+-loc_CEF7:
+-		cmp	_shot_level, 2
+-		jb	loc_D042
+-		cmp	_shot_level, SHOT_LEVEL_MAX
+-		jnz	short loc_CF0F
+-		mov	ax, _word_205D8
+-		mov	_word_205DC, ax
+-		jmp	short loc_CF15
+-; ---------------------------------------------------------------------------
+-
+-loc_CF0F:
+-		mov	_word_205DC, 0FFFFh
+-
+-loc_CF15:
+-		cmp	_byte_205DE, 0
+-		jnz	loc_D042
+-		mov	al, _shot_level
+-		mov	ah, 0
+-		sub	ax, 2
+-		mov	bx, ax
+-		cmp	bx, 7
+-		ja	loc_D029
+-		add	bx, bx
+-		jmp	cs:off_D047[bx]
+-
+-loc_CF36:
+-		mov	ax, si
+-		imul	ax, 30h
+-		push	ax
+-		pushd	0FFFCh
+-		call	sub_CAD2
+-		mov	di, 1
+-		jmp	loc_D029
+-; ---------------------------------------------------------------------------
+-
+-loc_CF4B:
+-		or	si, si
+-		jnz	short loc_CF56
+-		pushd	0
+-		push	0FFF0h
+-		jmp	short loc_CF7A
+-; ---------------------------------------------------------------------------
+-
+-loc_CF56:
+-		cmp	si, 1
+-		jnz	short loc_CF65
+-		push	300000h
+-		push	0FFF0h
+-		jmp	short loc_CF7A
+-; ---------------------------------------------------------------------------
+-
+-loc_CF65:
+-		cmp	si, 2
+-		jnz	short loc_CF72
+-		push	0FFF8FFFDh
+-		jmp	short loc_CF78
+-; ---------------------------------------------------------------------------
+-
+-loc_CF72:
+-		push	380003h
+-
+-loc_CF78:
+-		push	0FFFAh
+-
+-loc_CF7A:
+-		call	sub_CAD2
+-		mov	di, 3
+-		jmp	loc_D029
+-; ---------------------------------------------------------------------------
+-
+-loc_CF83:
+-		or	si, si
+-		jnz	short loc_CF8E
+-		pushd	0
+-		push	0FFDEh
+-		jmp	short loc_CFD0
+-; ---------------------------------------------------------------------------
+-
+-loc_CF8E:
+-		cmp	si, 1
+-		jnz	short loc_CF9D
+-		push	300000h
+-		push	0FFDEh
+-		jmp	short loc_CFD0
+-; ---------------------------------------------------------------------------
+-
+-loc_CF9D:
+-		cmp	si, 2
+-		jnz	short loc_CFAC
+-		push	0FFF8FFFBh
+-		push	0FFE4h
+-		jmp	short loc_CFD0
+-; ---------------------------------------------------------------------------
+-
+-loc_CFAC:
+-		cmp	si, 3
+-		jnz	short loc_CFBB
+-		push	380005h
+-		push	0FFE4h
+-		jmp	short loc_CFD0
+-; ---------------------------------------------------------------------------
+-
+-loc_CFBB:
+-		cmp	si, 4
+-		jnz	short loc_CFC8
+-		push	0FFF0FFF6h
+-		jmp	short loc_CFCE
+-; ---------------------------------------------------------------------------
+-
+-loc_CFC8:
+-		push	40000Ah
+-
+-loc_CFCE:
+-		push	0FFE8h
+-
+-loc_CFD0:
+-		call	sub_CAD2
+-		mov	di, 5
+-
+-loc_CFD6:
+-		or	si, si
+-		jnz	short loc_CFE1
+-		pushd	0
+-		push	0FFCAh
+-		jmp	short loc_D023
+-; ---------------------------------------------------------------------------
+-
+-loc_CFE1:
+-		cmp	si, 1
+-		jnz	short loc_CFF0
+-		push	300000h
+-		push	0FFCAh
+-		jmp	short loc_D023
+-; ---------------------------------------------------------------------------
+-
+-loc_CFF0:
+-		cmp	si, 2
+-		jnz	short loc_CFFF
+-		push	0FFF8FFF0h
+-		push	0FFCEh
+-		jmp	short loc_D023
+-; ---------------------------------------------------------------------------
+-
+-loc_CFFF:
+-		cmp	si, 3
+-		jnz	short loc_D00E
+-		push	380010h
+-		push	0FFCEh
+-		jmp	short loc_D023
+-; ---------------------------------------------------------------------------
+-
+-loc_D00E:
+-		cmp	si, 4
+-		jnz	short loc_D01B
+-		push	0FFF0FFE0h
+-		jmp	short loc_D021
+-; ---------------------------------------------------------------------------
+-
+-loc_D01B:
+-		push	400020h
+-
+-loc_D021:
+-		push	0FFD8h
+-
+-loc_D023:
+-		call	sub_CAD2
+-		mov	di, 5
+-
+-loc_D029:
+-		cmp	si, di
+-		jnz	short loc_D034
+-		mov	_byte_205DE, 1
+-		jmp	short loc_D042
+-; ---------------------------------------------------------------------------
+-
+-loc_D034:
+-		inc	si
+-
+-loc_D035:
+-		inc	word_205E2
+-
+-loc_D039:
+-		cmp	word_205E2, 26h	; '&'
+-		jl	loc_CD54
+-
+-loc_D042:
+-		pop	di
+-		pop	si
+-		leave
+-		retn
+-@shot_b$qv	endp
+-
+-; ---------------------------------------------------------------------------
+-		db 0
+-off_D047	dw offset loc_CF36
+-		dw offset loc_CF36
+-		dw offset loc_CF36
+-		dw offset loc_CF4B
+-		dw offset loc_CF4B
+-		dw offset loc_CF4B
+-		dw offset loc_CF83
+-		dw offset loc_CFD6
+-off_D057	dw offset loc_CD81
+-		dw offset loc_CD8C
+-		dw offset loc_CD97
+-		dw offset loc_CDA7
+-		dw offset loc_CDC2
+-		dw offset loc_CDDB
+-		dw offset loc_CDF9
+-		dw offset loc_CDF4
+-		dw offset loc_CE23
+-		dw offset loc_CE42
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @shot_c$qv
+-@shot_c$qv	proc near
+-
+-var_3		= byte ptr -3
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		push	si
+-		push	di
+-		xor	si, si
+-		mov	[bp+var_2], 0
+-		xor	di, di
+-		mov	[bp+var_3], 0
+-		inc	byte_20350
+-		mov	ax, _player_topleft.y
+-		add	ax, 32
+-		shl	ax, 4
+-		mov	word_205E4, ax
+-		cmp	_shot_level, 2
+-		jb	short loc_D09C
+-		mov	_shot_param_1, 7Ch	; '|'
+-
+-loc_D09C:
+-		mov	word_205E2, 0
+-		jmp	loc_D345
+-; ---------------------------------------------------------------------------
+-
+-loc_D0A5:
+-		mov	bx, word_205E2
+-		shl	bx, 4
+-		cmp	byte ptr [bx+2908h], 0
+-		jnz	loc_D341
+-		cmp	[bp+var_3], 0
+-		jnz	loc_D17D
+-		mov	al, _shot_level
+-		mov	ah, 0
+-		mov	bx, ax
+-		cmp	bx, SHOT_LEVEL_MAX
+-		ja	loc_D16E
+-		add	bx, bx
+-		jmp	cs:off_D362[bx]
+-
+-loc_D0D2:
+-		push	8
+-		push	0C0h
+-		call	sub_CA62
+-		jmp	loc_D16E
+-; ---------------------------------------------------------------------------
+-
+-loc_D0DD:
+-		push	8
+-		push	3
+-		call	@randring1_next8_and$quc
+-		add	al, 0BEh
+-		jmp	short loc_D0F1
+-; ---------------------------------------------------------------------------
+-
+-loc_D0E8:
+-		push	8
+-		push	7
+-		call	@randring1_next8_and$quc
+-		add	al, 0BCh
+-
+-loc_D0F1:
+-		push	ax
+-		call	sub_CA62
+-		jmp	short loc_D16E
+-; ---------------------------------------------------------------------------
+-
+-loc_D0F7:
+-		or	si, si
+-		jnz	short loc_D105
+-		push	8
+-		push	0C0h
+-		call	sub_CA62
+-		jmp	short loc_D158
+-; ---------------------------------------------------------------------------
+-
+-loc_D105:
+-		cmp	si, 1
+-		jnz	short loc_D116
+-		mov	[bp+var_2], 0FFF0h
+-		mov	_shot_param_1, 31h	; '1'
+-		jmp	short loc_D133
+-; ---------------------------------------------------------------------------
+-
+-loc_D116:
+-		cmp	si, 2
+-		jnz	short loc_D11D
+-		jmp	short loc_D12E
+-; ---------------------------------------------------------------------------
+-
+-loc_D11D:
+-		cmp	si, 3
+-		jnz	short loc_D129
+-		mov	[bp+var_2], 0FFF0h
+-		jmp	short loc_D133
+-; ---------------------------------------------------------------------------
+-
+-loc_D129:
+-		cmp	si, 4
+-		jnz	short loc_D133
+-
+-loc_D12E:
+-		mov	[bp+var_2], 20h	; ' '
+-
+-loc_D133:
+-		push	[bp+var_2]
+-		push	0C0h
+-		call	sub_CA62
+-		cmp	si, 3
+-		jl	short loc_D158
+-		mov	bx, word_205E2
+-		shl	bx, 4
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		add	bx, ax
+-		sub	word ptr [bx+290Ch], 100h
+-
+-loc_D158:
+-		mov	al, byte_20350
+-		mov	ah, 0
+-		mov	bx, 3
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jnz	short loc_D16C
+-		mov	di, 4
+-		jmp	short loc_D16E
+-; ---------------------------------------------------------------------------
+-
+-loc_D16C:
+-		xor	di, di
+-
+-loc_D16E:
+-		cmp	si, di
+-		jnz	loc_D340
+-		mov	[bp+var_3], 1
+-		xor	si, si
+-		jmp	loc_D341
+-; ---------------------------------------------------------------------------
+-
+-loc_D17D:
+-		cmp	_shot_level, 2
+-		jb	loc_D34E
+-		cmp	_shot_level, 3
+-		jnb	short loc_D197
+-		cmp	_byte_205DE, 0
+-		jz	short loc_D1E3
+-		jmp	loc_D34E
+-; ---------------------------------------------------------------------------
+-
+-loc_D197:
+-		cmp	_shot_level, 4
+-		jnb	short loc_D1B0
+-		mov	al, byte_20350
+-		mov	ah, 0
+-		mov	bx, 5
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jz	short loc_D1E3
+-		jmp	loc_D34E
+-; ---------------------------------------------------------------------------
+-
+-loc_D1B0:
+-		cmp	_shot_level, 6
+-		jnb	short loc_D1C1
+-		test	byte_20350, 3
+-		jz	short loc_D1E3
+-		jmp	loc_D34E
+-; ---------------------------------------------------------------------------
+-
+-loc_D1C1:
+-		cmp	_shot_level, SHOT_LEVEL_MAX
+-		jnb	short loc_D1DA
+-		mov	al, byte_20350
+-		mov	ah, 0
+-		mov	bx, 3
+-		cwd
+-		idiv	bx
+-		or	dx, dx
+-		jz	short loc_D1E3
+-		jmp	loc_D34E
+-; ---------------------------------------------------------------------------
+-
+-loc_D1DA:
+-		test	byte_20350, 1
+-		jnz	loc_D34E
+-
+-loc_D1E3:
+-		mov	al, _shot_level
+-		mov	ah, 0
+-		sub	ax, 2
+-		mov	bx, ax
+-		cmp	bx, 7
+-		ja	loc_D335
+-		add	bx, bx
+-		jmp	cs:off_D352[bx]
+-
+-loc_D1FB:
+-		mov	ax, si
+-		imul	ax, 30h
+-		push	ax
+-		pushd	0FFFCh
+-		jmp	short loc_D215
+-; ---------------------------------------------------------------------------
+-
+-loc_D209:
+-		mov	ax, si
+-		imul	ax, 30h
+-		push	ax
+-		pushd	0FFF0h
+-
+-loc_D215:
+-		call	sub_CAD2
+-		mov	di, 1
+-		jmp	loc_D335
+-; ---------------------------------------------------------------------------
+-
+-loc_D21E:
+-		or	si, si
+-		jnz	short loc_D227
+-		pushd	4
+-		jmp	short loc_D241
+-; ---------------------------------------------------------------------------
+-
+-loc_D227:
+-		cmp	si, 1
+-		jnz	short loc_D234
+-		push	30FFFCh
+-		jmp	short loc_D241
+-; ---------------------------------------------------------------------------
+-
+-loc_D234:
+-		cmp	si, 2
+-		jnz	short loc_D23D
+-		push	0FFF8h
+-		jmp	short loc_D23F
+-; ---------------------------------------------------------------------------
+-
+-loc_D23D:
+-		push	38h ; '8'
+-
+-loc_D23F:
+-		push	0
+-
+-loc_D241:
+-		push	0FFF0h
+-		call	sub_CAD2
+-		jmp	loc_D332
+-; ---------------------------------------------------------------------------
+-
+-loc_D249:
+-		or	si, si
+-		jnz	short loc_D252
+-		pushd	6
+-		jmp	short loc_D26C
+-; ---------------------------------------------------------------------------
+-
+-loc_D252:
+-		cmp	si, 1
+-		jnz	short loc_D25F
+-		push	30FFFAh
+-		jmp	short loc_D26C
+-; ---------------------------------------------------------------------------
+-
+-loc_D25F:
+-		cmp	si, 2
+-		jnz	short loc_D268
+-		push	0FFF8h
+-		jmp	short loc_D26A
+-; ---------------------------------------------------------------------------
+-
+-loc_D268:
+-		push	38h ; '8'
+-
+-loc_D26A:
+-		push	0
+-
+-loc_D26C:
+-		push	0FFE8h
+-		call	sub_CAD2
+-		jmp	loc_D332
+-; ---------------------------------------------------------------------------
+-
+-loc_D274:
+-		or	si, si
+-		jnz	short loc_D27D
+-		pushd	6
+-		jmp	short loc_D297
+-; ---------------------------------------------------------------------------
+-
+-loc_D27D:
+-		cmp	si, 1
+-		jnz	short loc_D28A
+-		push	30FFFAh
+-		jmp	short loc_D297
+-; ---------------------------------------------------------------------------
+-
+-loc_D28A:
+-		cmp	si, 2
+-		jnz	short loc_D293
+-		push	0FFF8h
+-		jmp	short loc_D295
+-; ---------------------------------------------------------------------------
+-
+-loc_D293:
+-		push	38h ; '8'
+-
+-loc_D295:
+-		push	0
+-
+-loc_D297:
+-		push	0FFE6h
+-		call	sub_CAD2
+-		jmp	loc_D332
+-; ---------------------------------------------------------------------------
+-
+-loc_D29F:
+-		or	si, si
+-		jnz	short loc_D2A8
+-		pushd	0Ah
+-		jmp	short loc_D2C8
+-; ---------------------------------------------------------------------------
+-
+-loc_D2A8:
+-		cmp	si, 1
+-		jnz	short loc_D2B5
+-		push	30FFF6h
+-		jmp	short loc_D2C8
+-; ---------------------------------------------------------------------------
+-
+-loc_D2B5:
+-		cmp	si, 2
+-		jnz	short loc_D2C2
+-		push	0FFF8FFFCh
+-		jmp	short loc_D2C8
+-; ---------------------------------------------------------------------------
+-
+-loc_D2C2:
+-		push	380004h
+-
+-loc_D2C8:
+-		push	0FFD0h
+-		call	sub_CAD2
+-		jmp	short loc_D332
+-; ---------------------------------------------------------------------------
+-
+-loc_D2CF:
+-		or	si, si
+-		jnz	short loc_D2DE
+-		pushd	0FFF6h
+-		push	0FF60h
+-		jmp	short loc_D323
+-; ---------------------------------------------------------------------------
+-
+-loc_D2DE:
+-		cmp	si, 1
+-		jnz	short loc_D2EE
+-		push	30000Ah
+-		push	0FF60h
+-		jmp	short loc_D323
+-; ---------------------------------------------------------------------------
+-
+-loc_D2EE:
+-		cmp	si, 2
+-		jnz	short loc_D2FE
+-		push	0FFF80014h
+-		push	0FF74h
+-		jmp	short loc_D323
+-; ---------------------------------------------------------------------------
+-
+-loc_D2FE:
+-		cmp	si, 3
+-		jnz	short loc_D30E
+-		push	38FFECh
+-		push	0FF74h
+-		jmp	short loc_D323
+-; ---------------------------------------------------------------------------
+-
+-loc_D30E:
+-		cmp	si, 4
+-		jnz	short loc_D31B
+-		push	0FFF0FFF9h
+-		jmp	short loc_D321
+-; ---------------------------------------------------------------------------
+-
+-loc_D31B:
+-		push	400007h
+-
+-loc_D321:
+-		push	0FF88h
+-
+-loc_D323:
+-		call	sub_CAD2
+-		test	byte_20350, 3
+-		jnz	short loc_D332
+-		mov	di, 5
+-		jmp	short loc_D335
+-; ---------------------------------------------------------------------------
+-
+-loc_D332:
+-		mov	di, 3
+-
+-loc_D335:
+-		cmp	si, di
+-		jnz	short loc_D340
+-		mov	_byte_205DE, 1
+-		jmp	short loc_D34E
+-; ---------------------------------------------------------------------------
+-
+-loc_D340:
+-		inc	si
+-
+-loc_D341:
+-		inc	word_205E2
+-
+-loc_D345:
+-		cmp	word_205E2, 26h	; '&'
+-		jl	loc_D0A5
+-
+-loc_D34E:
+-		pop	di
+-		pop	si
+-		leave
+-		retn
+-@shot_c$qv	endp
+-
+-; ---------------------------------------------------------------------------
+-off_D352	dw offset loc_D1FB
+-		dw offset loc_D1FB
+-		dw offset loc_D209
+-		dw offset loc_D21E
+-		dw offset loc_D249
+-		dw offset loc_D274
+-		dw offset loc_D29F
+-		dw offset loc_D2CF
+-off_D362	dw offset loc_D0D2
+-		dw offset loc_D0D2
+-		dw offset loc_D0D2
+-		dw offset loc_D0DD
+-		dw offset loc_D0DD
+-		dw offset loc_D0DD
+-		dw offset loc_D0E8
+-		dw offset loc_D0E8
+-		dw offset loc_D0E8
+-		dw offset loc_D0F7
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sub_D376	proc far
+-		push	bp
+-		mov	bp, sp
+-		xor	ax, ax
+-		jmp	short loc_D388
+-; ---------------------------------------------------------------------------
+-
+-loc_D37D:
+-		mov	bx, ax
+-		shl	bx, 4
+-		mov	byte ptr [bx+2908h], 0
+-		inc	ax
+-
+-loc_D388:
+-		cmp	ax, 26h	; '&'
+-		jl	short loc_D37D
+-		pop	bp
+-		retf
+-sub_D376	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @sub_D38F$qv
+-@sub_D38F$qv	proc near
+-
+-var_3		= byte ptr -3
+-@@left		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		push	si
+-		push	di
+-		mov	[bp+var_3], 0
+-		mov	si, 2908h
+-		xor	di, di
+-		jmp	loc_D472
+-; ---------------------------------------------------------------------------
+-
+-loc_D3A3:
+-		cmp	byte ptr [si], 0
+-		jz	loc_D46E
+-		cmp	_reduce_effects, 0
+-		jz	short loc_D3BF
+-		mov	al, _page_back
+-		mov	ah, 0
+-		mov	dx, di
+-		and	dx, 1
+-		cmp	ax, dx
+-		jnz	short loc_D419
+-
+-loc_D3BF:
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		mov	ax, [bx+si+2]
+-		sar	ax, 4
+-		mov	[bp+@@left], ax
+-		cmp	byte ptr [si+0Eh], 7Ch ; '|'
+-		jb	short loc_D3DE
+-		cmp	byte ptr [si+1], 0
+-		jnz	short loc_D3FA
+-
+-loc_D3DE:
+-		push	[bp+@@left]	; left
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		mov	ax, [bx+si+4]
+-		sar	ax, 4
+-		push	ax	; top
+-		push	(16 shl 16) or 16	; (w shl 16) or h
+-		jmp	short loc_D414
+-; ---------------------------------------------------------------------------
+-
+-loc_D3FA:
+-		push	[bp+@@left]	; left
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		mov	ax, [bx+si+4]
+-		sar	ax, 4
+-		push	ax	; top
+-		push	(32 shl 16) or 32	; (w shl 16) or h
+-
+-loc_D414:
+-		call	@tiles_invalidate_rect$qiiii
+-
+-loc_D419:
+-		cmp	byte ptr [si], 2
+-		jnz	short loc_D423
+-		mov	byte ptr [si], 0
+-		jmp	short loc_D46E
+-; ---------------------------------------------------------------------------
+-
+-loc_D423:
+-		mov	bx, di
+-		shl	bx, 4
+-		mov	al, _page_front
+-		mov	ah, 0
+-		shl	ax, 2
+-		add	bx, ax
+-		mov	ax, [bx+290Ah]
+-		mov	dl, _page_back
+-		mov	dh, 0
+-		shl	dx, 2
+-		mov	bx, dx
+-		mov	[bx+si+2], ax
+-		mov	bx, di
+-		shl	bx, 4
+-		mov	al, _page_front
+-		mov	ah, 0
+-		shl	ax, 2
+-		add	bx, ax
+-		mov	ax, [bx+290Ch]
+-		mov	dl, _page_back
+-		mov	dh, 0
+-		shl	dx, 2
+-		mov	bx, dx
+-		mov	[bx+si+4], ax
+-		cmp	byte ptr [si+0Fh], 0
+-		jz	short loc_D46E
+-		inc	[bp+var_3]
+-
+-loc_D46E:
+-		inc	di
+-		add	si, 10h
+-
+-loc_D472:
+-		cmp	di, 26h	; '&'
+-		jl	loc_D3A3
+-		cmp	[bp+var_3], 0
+-		jnz	short loc_D484
+-		mov	_byte_205DE, 0
+-
+-loc_D484:
+-		pop	di
+-		pop	si
+-		leave
+-		retn
+-@sub_D38F$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-public @shots_update_and_render$qv
+-@shots_update_and_render$qv proc near
+-
+-var_E		= word ptr -0Eh
+-var_C		= word ptr -0Ch
+-var_9		= byte ptr -9
+-var_8		= word ptr -8
+-var_6		= word ptr -6
+-@@x		= word ptr -4
+-var_2		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 0Eh
+-		push	si
+-		push	di
+-		mov	al, _reduce_effects
+-		mov	cl, _page_back
+-		shl	al, cl
+-		mov	[bp+var_9], al
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	[bp+var_C], ax
+-		mov	si, 2908h
+-		mov	[bp+var_2], 0
+-		jmp	loc_D61D
+-; ---------------------------------------------------------------------------
+-
+-loc_D4B2:
+-		cmp	byte ptr [si], 1
+-		jnz	loc_D613
+-		mov	ax, si
+-		add	ax, [bp+var_C]
+-		add	ax, 2
+-		mov	[bp+var_6], ax
+-		mov	ax, si
+-		add	ax, [bp+var_C]
+-		add	ax, 4
+-		mov	[bp+var_8], ax
+-		mov	ax, [si+0Ah]
+-		mov	bx, [bp+var_6]
+-		add	[bx], ax
+-		mov	ax, [si+0Ch]
+-		mov	bx, [bp+var_8]
+-		add	[bx], ax
+-		mov	ax, [bx]
+-		sar	ax, 4
+-		mov	di, ax
+-		mov	bx, [bp+var_6]
+-		mov	ax, [bx]
+-		sar	ax, 4
+-		mov	[bp+@@x], ax
+-		cmp	word ptr [bx], 100h
+-		jle	short loc_D508
+-		cmp	word ptr [bx], 1A20h
+-		jge	short loc_D508
+-		cmp	di, 180h
+-		jg	short loc_D508
+-		cmp	di, 8
+-		jge	short loc_D50E
+-
+-loc_D508:
+-		mov	byte ptr [si], 2
+-		jmp	loc_D613
+-; ---------------------------------------------------------------------------
+-
+-loc_D50E:
+-		add	di, _scroll_line
+-		cmp	di, RES_Y
+-		jl	short loc_D51C
+-		sub	di, RES_Y
+-
+-loc_D51C:
+-		cmp	byte ptr [si+0Fh], 0
+-		jnz	loc_D5B0
+-		mov	bx, [bp+var_2]
+-		inc	byte ptr [bx+28E1h]
+-		cmp	byte ptr [si+1], 0
+-		jnz	short loc_D55D
+-		cmp	[bp+var_9], 2
+-		jz	loc_D613
+-		mov	al, [si+0Eh]
+-		mov	ah, 0
+-		mov	[bp+var_E], ax
+-		cmp	[bp+var_E], 32h	; '2'
+-		jl	short loc_D553
+-		mov	al, [bx+28E1h]
+-		mov	ah, 0
+-		and	ax, 1
+-		add	[bp+var_E], ax
+-
+-loc_D553:
+-		push	[bp+@@x]
+-		push	di
+-		push	[bp+var_E]
+-		jmp	loc_D60E
+-; ---------------------------------------------------------------------------
+-
+-loc_D55D:
+-		cmp	byte ptr [si+1], 5
+-		jbe	short loc_D569
+-		mov	byte ptr [si], 2
+-		jmp	loc_D613
+-; ---------------------------------------------------------------------------
+-
+-loc_D569:
+-		cmp	[bp+var_9], 2
+-		jz	short loc_D59F
+-		cmp	byte ptr [si+0Eh], 7Ch ; '|'
+-		jnb	short loc_D589
+-		push	[bp+@@x]
+-		push	di
+-		mov	al, [si+1]
+-		mov	ah, 0
+-		add	ax, 74
+-		push	ax
+-		call	super_roll_put_tiny
+-		jmp	short loc_D59F
+-; ---------------------------------------------------------------------------
+-
+-loc_D589:
+-		push	[bp+@@x]
+-		push	di
+-		mov	al, [si+1]
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		push	word ptr [bx+0A94h]
+-		call	super_roll_put
+-
+-loc_D59F:
+-		test	byte ptr _stage_frame, 3
+-		jnz	short loc_D613
+-		mov	al, [si+1]
+-		inc	al
+-		mov	[si+1],	al
+-		jmp	short loc_D613
+-; ---------------------------------------------------------------------------
+-
+-loc_D5B0:
+-		cmp	byte ptr [si+1], 1
+-		jbe	short loc_D5ED
+-		mov	al, _byte_1E518
+-		cbw
+-		movsx	ebx, ax
+-		mov	eax, _stage_frame
+-		xor	edx, edx
+-		div	ebx
+-		cmp	edx, 0
+-		jnz	short loc_D5E1
+-		mov	al, [si+1]
+-		inc	al
+-		mov	[si+1],	al
+-		cmp	byte ptr [si+1], 4
+-		jbe	short loc_D5E1
+-		mov	byte ptr [si], 2
+-		jmp	short loc_D613
+-; ---------------------------------------------------------------------------
+-
+-loc_D5E1:
+-		test	byte ptr _stage_frame, 1
+-		jz	short loc_D5F7
+-		sar	word ptr [si+0Ch], 1
+-		jmp	short loc_D5F7
+-; ---------------------------------------------------------------------------
+-
+-loc_D5ED:
+-		cmp	byte ptr [si+0Eh], 3Bh ; ';'
+-		jz	short loc_D5F7
+-		sub	word ptr [si+0Ch], 4
+-
+-loc_D5F7:
+-		cmp	[bp+var_9], 2
+-		jz	short loc_D613
+-		push	[bp+@@x]
+-		push	di
+-		mov	al, [si+0Eh]
+-		mov	ah, 0
+-		mov	dl, [si+1]
+-		mov	dh, 0
+-		add	ax, dx
+-		push	ax
+-
+-loc_D60E:
+-		call	super_roll_put_tiny
+-
+-loc_D613:
+-		inc	[bp+var_2]
+-		xor	[bp+var_9], 3
+-		add	si, 10h
+-
+-loc_D61D:
+-		cmp	[bp+var_2], 26h	; '&'
+-		jl	loc_D4B2
+-		pop	di
+-		pop	si
+-		leave
+-		retn
+-@shots_update_and_render$qv endp
++	extern @sub_CA1C$qv:proc
++	extern @shot_a$qv:near
++	extern @shot_b$qv:near
++	extern @shot_c$qv:near
++	extern @shots_clear$qv:proc
++	extern @shots_invalidate$qv:near
++	extern @shots_update_and_render$qv:near
+ main_01__TEXT	ends
+ 
+ ITEM_TEXT	segment	byte public 'CODE' use16
+@@ -4620,8 +2888,8 @@ midboss3_1120F	proc near
+ 		add	bx, bx
+ 		mov	_midboss3_kill_frame[bx], 0
+ 		mov	midboss3_flag[si], M3F_REMOVED
+-		mov	_word_205D8, 0FFFFh
+-		mov	_word_205DA, 0FFFFh
++		mov	_shot_target_left, 0FFFFh
++		mov	_shot_target_top, 0FFFFh
+ 		jmp	short loc_11302
+ ; ---------------------------------------------------------------------------
+ 
+@@ -4883,7 +3151,7 @@ var_2		= word ptr -2
+ 		mov	bx, ax
+ 		mov	ax, midboss3_0_left_on_page[bx]
+ 		add	ax, 24
+-		mov	_word_205D8, ax
++		mov	_shot_target_left, ax
+ 		mov	al, _page_back
+ 		mov	ah, 0
+ 		add	ax, ax
+@@ -4899,7 +3167,7 @@ loc_1150C:
+ 		mov	bx, ax
+ 		mov	ax, midboss3_1_left_on_page[bx]
+ 		add	ax, 24
+-		mov	_word_205D8, ax
++		mov	_shot_target_left, ax
+ 		mov	al, _page_back
+ 		mov	ah, 0
+ 		add	ax, ax
+@@ -4908,7 +3176,7 @@ loc_1150C:
+ 
+ loc_1152C:
+ 		add	ax, 16
+-		mov	_word_205DA, ax
++		mov	_shot_target_top, ax
+ 		inc	_boss_phase_frame
+ 		cmp	_boss_phase_frame, 1
+ 		jnz	short loc_11581
+@@ -5413,12 +3681,12 @@ loc_1194A:
+ 		add	bx, bx
+ 		mov	ax, _stone_left[bx]
+ 		add	ax, 8
+-		mov	_word_205D8, ax
++		mov	_shot_target_left, ax
+ 		mov	bx, si
+ 		add	bx, bx
+ 		mov	ax, _stone_top[bx]
+ 		add	ax, 8
+-		mov	_word_205DA, ax
++		mov	_shot_target_top, ax
+ 		jmp	short loc_11975
+ ; ---------------------------------------------------------------------------
+ 
+@@ -6900,8 +5168,8 @@ loc_124EC:
+ 		mov	word_22FAA, 0
+ 		mov	ax, _stone_left[STONE_NORTH * word]
+ 		add	ax, 8
+-		mov	_word_205D8, ax
+-		mov	_word_205DA, 20h	; ' '
++		mov	_shot_target_left, ax
++		mov	_shot_target_top, 20h	; ' '
+ 		jmp	loc_12734
+ ; ---------------------------------------------------------------------------
+ 
+@@ -8290,8 +6558,8 @@ midboss1_137FE	proc near
+ 		call	@sparks_add$qiuiiii
+ 		mov	word_1ED96, 0
+ 		mov	_boss_phase_frame, 0
+-		mov	_word_205D8, 0FFFFh
+-		mov	_word_205DA, 0FFFFh
++		mov	_shot_target_left, 0FFFFh
++		mov	_shot_target_top, 0FFFFh
+ 		mov	word_24E82, 0
+ 		jmp	short loc_138AF
+ ; ---------------------------------------------------------------------------
+@@ -8391,8 +6659,8 @@ var_2		= word ptr -2
+ 		mov	bp, sp
+ 		sub	sp, 2
+ 		push	si
+-		mov	_word_205D8, 0D8h
+-		mov	_word_205DA, 40h
++		mov	_shot_target_left, 0D8h
++		mov	_shot_target_top, 40h
+ 		inc	_boss_phase_frame
+ 		cmp	_boss_phase_frame, 1
+ 		jnz	short loc_1395A
+@@ -9081,8 +7349,8 @@ public @rika_update$qv
+ 		mov	bp, sp
+ 		mov	ax, point_24E7C.x
+ 		add	ax, 24
+-		mov	_word_205D8, ax
+-		mov	_word_205DA, 30h	; '0'
++		mov	_shot_target_left, ax
++		mov	_shot_target_top, 30h	; '0'
+ 		inc	_boss_phase_frame
+ 		cmp	_byte_2066A, 0
+ 		jnz	short loc_1402D
+@@ -9285,8 +7553,8 @@ loc_141A1:
+ 		mov	_boss_phase_frame, 0
+ 		mov	_byte_2066A, 0
+ 		mov	word_250E2, 0
+-		mov	_word_205D8, 0FFFFh
+-		mov	_word_205DA, 0FFFFh
++		mov	_shot_target_left, 0FFFFh
++		mov	_shot_target_top, 0FFFFh
+ 		jmp	short loc_141FF
+ ; ---------------------------------------------------------------------------
+ 
+@@ -9365,11 +7633,11 @@ var_2		= word ptr -2
+ 		push	si
+ 		push	di
+ 		xor	di, di
+-		mov	_word_205D8, 0D8h
++		mov	_shot_target_left, 0D8h
+ 		mov	bx, _boss_top_on_back_page
+ 		mov	ax, [bx]
+ 		add	ax, 24
+-		mov	_word_205DA, ax
++		mov	_shot_target_top, ax
+ 		inc	_boss_phase_frame
+ 		cmp	_boss_phase_frame, 1
+ 		jnz	short loc_1429E
+@@ -11037,8 +9305,8 @@ public @meira_update$qv
+ 		mov	bx, _boss_left_on_back_page
+ 		mov	ax, [bx]
+ 		add	ax, 40
+-		mov	_word_205D8, ax
+-		mov	_word_205DA, si
++		mov	_shot_target_left, ax
++		mov	_shot_target_top, si
+ 		cmp	_byte_2066A, 0
+ 		jz	short loc_1512B
+ 		call	meira_14519
+@@ -13635,9 +11903,9 @@ var_1		= byte ptr -1
+ 		mov	top_253B8, ax
+ 		inc	_boss_phase_frame
+ 		mov	ax, left_253B6
+-		mov	_word_205D8, ax
++		mov	_shot_target_left, ax
+ 		mov	ax, top_253B8
+-		mov	_word_205DA, ax
++		mov	_shot_target_top, ax
+ 		test	byte ptr _stage_frame, 1
+ 		jnz	short loc_167D0
+ 		mov	al, byte_255BE
+@@ -13835,7 +12103,7 @@ public @sigma_init$qv
+ 		mov	byte_255B2, 0
+ 		mov	byte_2558C, 7
+ 		nopcall	@bullets_clear$qv
+-		call	sub_D376
++		call	@shots_clear$qv
+ 		push	1
+ 		call	palette_white_out
+ 		call	sigma_158DC
+@@ -15370,8 +13638,8 @@ var_2		= word ptr -2
+ 		push	di
+ 		mov	[bp+var_2], 0
+ 		mov	[bp+var_4], 0
+-		mov	_word_205D8, 0FFFFh
+-		mov	_word_205DA, 0FFFFh
++		mov	_shot_target_left, 0FFFFh
++		mov	_shot_target_top, 0FFFFh
+ 		mov	word_26C46, 7B50h
+ 		xor	di, di
+ 		jmp	loc_1796A
+@@ -15497,9 +13765,9 @@ loc_177CE:
+ 		jle	short loc_177EB
+ 		mov	ax, left_26C4E
+ 		add	ax, 8
+-		mov	_word_205D8, ax
++		mov	_shot_target_left, ax
+ 		lea	ax, [si+8]
+-		mov	_word_205DA, ax
++		mov	_shot_target_top, ax
+ 		mov	[bp+var_4], si
+ 
+ loc_177EB:
+@@ -15964,7 +14232,7 @@ public @mima_init$qv
+ 		add	sp, 6
+ 		call	@dialog_script_stage5_pre_winged_$qv
+ 		call	@dialog_post$qv
+-		call	sub_D376
++		call	@shots_clear$qv
+ 		mov	_boss_damage, 0
+ 		mov	_byte_2066A, 0
+ 		mov	_boss_phase_frame, 0
+@@ -16061,7 +14329,7 @@ public @mima_19C8D$qv
+ @mima_19C8D$qv	proc near
+ 		push	bp
+ 		mov	bp, sp
+-		call	sub_D376
++		call	@shots_clear$qv
+ 		nopcall	@bullets_clear$qv
+ 		mov	al, _page_back
+ 		mov	ah, 0
+@@ -16414,8 +14682,8 @@ loc_19FDA:
+ 		mov	word_1EE98, 0
+ 		mov	_boss_phase_frame, 0
+ 		mov	_byte_2066A, 2
+-		mov	_word_205D8, 0FFFFh
+-		mov	_word_205DA, 0FFFFh
++		mov	_shot_target_left, 0FFFFh
++		mov	_shot_target_top, 0FFFFh
+ 		mov	word_26D7A, 0
+ 		mov	word_26CFE, 0FFFFh
+ 		mov	_midboss_tile_row, 660h
+@@ -16684,10 +14952,10 @@ public @midboss4_update_and_render$qv
+ 		mov	bp, sp
+ 		mov	ax, _marisa_topleft.x
+ 		add	ax, 24
+-		mov	_word_205D8, ax
++		mov	_shot_target_left, ax
+ 		mov	ax, _marisa_topleft.y
+ 		add	ax, 24
+-		mov	_word_205DA, ax
++		mov	_shot_target_top, ax
+ 		inc	_boss_phase_frame
+ 		cmp	_boss_phase_frame, 1
+ 		jnz	short loc_1A296
+@@ -17347,7 +15615,7 @@ public @marisa_init$qv
+ 		graph_accesspage _page_back
+ 		graph_showpage _page_front
+ 		mov	_tile_mode, TM_NONE
+-		call	sub_D376
++		call	@shots_clear$qv
+ 		mov	_boss_damage, 0
+ 		mov	_byte_2066A, 0
+ 		mov	_boss_phase_frame, 0
+@@ -17775,21 +16043,12 @@ include th02/sprites/pointnum.asp
+ public _scroll_interval, _scroll_done
+ _scroll_interval	db 4
+ _scroll_done	db 0
+-byte_1E502	db 0
++public _byte_1E502
++_byte_1E502	db 0
+ public _scroll_speed_this_frame
+ _scroll_speed_this_frame	db 0
+-		db  27h	; '
+-		db    0
+-		db  27h	; '
+-		db    0
+-		db  27h	; '
+-		db    0
+-		db  28h	; (
+-		db    0
+-		db  29h	; )
+-		db    0
+-		db  2Fh	; /
+-		db    0
++public _SHOT_BIG_HIT_PATNUMS
++_SHOT_BIG_HIT_PATNUMS	dw 27h, 27h, 27h, 28h, 29h, 2Fh
+ public _angle_1E510
+ _angle_1E510	db 20h
+ 		db 0
+@@ -17800,8 +16059,8 @@ _player_patnum	dw PAT_PLAYCHAR_STILL
+ public _power, _miss_active
+ _power	db 1
+ _miss_active	db 0
+-public _byte_1E518
+-_byte_1E518	db 4
++public _shot_option_frames_per_age
++_shot_option_frames_per_age	db 4
+ public _shot_param_1
+ _shot_param_1	db 40h
+ public _shot_param_2
+@@ -18597,27 +16856,33 @@ public _tile_rows_scrolled
+ _tile_rows_scrolled	dw ?
+ public _tile_row_scrolled
+ _tile_row_scrolled	dw ?
+-byte_2034E	db ?
++public _byte_2034E
++_byte_2034E	db ?
++		db ?
++public _shot_c_cycle
++_shot_c_cycle	db ?
++public _shot_frames
++_shot_frames	db 38 dup(?)
+ 		db ?
+-byte_20350	db ?
+-		db 39 dup(?)
+ public _shots
+ _shots	db 608 dup(?)
+-public _word_205D8
+-_word_205D8	dw ?
+-public _word_205DA
+-_word_205DA	dw ?
+-public _word_205DC
+-_word_205DC	dw ?
+-public _byte_205DE
+-_byte_205DE	db ?
++public _shot_target_left
++_shot_target_left	dw ?
++public _shot_target_top
++_shot_target_top	dw ?
++public _shot_target_left_unused
++_shot_target_left_unused	dw ?
++public _option_shots_active
++_option_shots_active	db ?
+ public _byte_205DF
+ _byte_205DF	db ?
+ public _byte_205E0
+ _byte_205E0	db ?
+ 		db ?
+-word_205E2	dw ?
+-word_205E4	dw ?
++public _shot_slot
++_shot_slot	dw ?
++public _shot_top_new
++_shot_top_new	dw ?
+ public _player_left_on_page, _player_top_on_page
+ public _player_left_on_back_page, _player_top_on_back_page
+ public _player_option_left_left_on_back_, _player_option_left_top_on_back_p
