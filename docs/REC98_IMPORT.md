@@ -54,6 +54,19 @@ codegen for `_AL = _AH` emits `8A C4`. So ZUN wrote `sub_B3DA` and `sub_BCB1`
 as C/C++ functions with inline `asm`. Decompiling them that way fixes these
 bytes naturally; patching `db` bytes into the ASM would not be natural source.
 
+### Status after the local patches
+
+The four alignment-fill rows are fixed by `db 0` before the `GRCG_CIRCLE_X`
+and `SUPER_PUT` includes and by inlining `vs[data].asm` with its original
+`90h` fill (TH02 files only; the include is shared with TH03–TH05). OP.EXE and
+MAINE.EXE program images are now byte-identical. In MAIN only the 13 inline-asm
+bytes of `sub_B3DA`/`sub_BCB1` remain.
+
+One more ReC98 prototype inaccuracy surfaced while decompiling callers:
+`bullets_add_16x16()` takes `patnum` as `int`, not the byte-sized
+`main_patnum_t`. Only `int, int` constant pairs are pushed as one
+`push imm32`, as the original callers do.
+
 ### Container differences
 
 Even with every program byte equal, the EXE files would still differ:

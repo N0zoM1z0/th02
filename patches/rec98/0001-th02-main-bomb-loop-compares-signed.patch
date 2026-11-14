@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: w <w@w>
+Date: Sat, 14 Nov 2026 19:08:39 +0100
+Subject: [PATCH] th02 main: bomb loop compares signed
+
+---
+ th02/main/player/bomb.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/th02/main/player/bomb.cpp b/th02/main/player/bomb.cpp
+index 44b8f433..8c925ff1 100644
+--- a/th02/main/player/bomb.cpp
++++ b/th02/main/player/bomb.cpp
+@@ -229,7 +229,7 @@ void pascal near bomb_bft_8tiles_put_8(
+ 		tile_cur >>= 1;
+ 		_DI += TILE_VRAM_W;
+ 		_SI++;
+-	} while(_SI < BYTE_DOTS);
++	} while(static_cast<int>(_SI) < BYTE_DOTS);
+ 
+ 	#undef tiles
+ 	#undef tile_cur

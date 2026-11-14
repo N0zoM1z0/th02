@@ -2,7 +2,7 @@
 """Build TH02 from pinned ReC98 plus this repository's patches, then compare.
 
 1. `git archive` the pinned ReC98 revision into a fresh private run directory.
-2. Apply every `patches/rec98/*.patch` in name order (`patch -p1`).
+2. Apply every `patches/rec98/*.patch` in name order (`git apply`).
 3. Run ReC98's `build.bat` with the attested Borland toolchain under Wine.
 4. Write the per-contribution ledger and print the strict raw comparison.
 
@@ -48,8 +48,11 @@ def main() -> int:
     subprocess.run(["tar", "-x", "-C", str(source)], input=archive, check=True)
 
     patches = [] if args.no_patches else sorted(PATCHES.glob("*.patch"))
-    for patch in patches:
-        subprocess.run(["patch", "-p1", "--forward", "--batch", "--quiet", "-i", str(patch)],
+    if patches:
+        # The run directory lives inside this repository; give the tree its
+        # own repository so that `git apply` resolves paths against it.
+        subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+        subprocess.run(["git", "apply", "--whitespace=nowarn", *map(str, patches)],
                        cwd=source, check=True)
 
     environment = os.environ.copy()

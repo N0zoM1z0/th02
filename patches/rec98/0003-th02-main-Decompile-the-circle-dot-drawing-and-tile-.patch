@@ -1,0 +1,460 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 19:16:08 +0100
+Subject: [PATCH] [th02/main] Decompile the circle dot drawing and tile
+ invalidation loops
+
+---
+ Tupfile.lua      |   1 +
+ th02/main_04.cpp |  61 +++++++++++++
+ th02_main.asm    | 233 +++++++----------------------------------------
+ 3 files changed, 94 insertions(+), 201 deletions(-)
+ create mode 100644 th02/main_04.cpp
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index 90170c70..7d15af04 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -543,6 +543,7 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/snd_se_r.cpp",
+ 	"th02/snd_se.cpp",
+ 	"th02/main_03.cpp",
++	"th02/main_04.cpp",
+ 	"th02/hud_ovrl.cpp",
+ 	"th02/bullet.cpp",
+ 	"th02/dialog.cpp",
+diff --git a/th02/main_04.cpp b/th02/main_04.cpp
+new file mode 100644
+index 00000000..53a1014f
+--- /dev/null
++++ b/th02/main_04.cpp
+@@ -0,0 +1,61 @@
++#pragma option -G
++
++/* ReC98
++ * -----
++ * Code segment #4 of TH02's MAIN.EXE
++ */
++
++#include "platform.h"
++#include "pc98.h"
++#include "th01/math/polar.hpp"
++#include "th02/main/playfld.hpp"
++#include "th02/main/scroll.hpp"
++#include "th02/main/tile/tile.hpp"
++
++// Position of the next dot drawn by circle_dot_put().
++extern screen_x_t circle_dot_left;
++extern vram_y_t circle_dot_top;
++
++// Draws a dot of the given [size] at ([circle_dot_left], [circle_dot_top]).
++void pascal circle_dot_put(int size);
++
++void pascal circle_dots_put(
++	screen_x_t center_x, screen_y_t center_y, pixel_t radius, int angle_step
++)
++{
++	unsigned int i;
++	unsigned char angle;
++	unsigned char size = ((radius >> 6) + 1);
++	for(i = 0; i < 0x100; i += angle_step) {
++		angle = i;
++		circle_dot_left = polar_x_fast(center_x, radius, angle);
++		circle_dot_top = polar_y_fast(center_y, radius, angle);
++		if(
++			(circle_dot_left < 0x1A0) && (circle_dot_left > 0x18) &&
++			(circle_dot_top > 8) && (circle_dot_top < 0x180)
++		) {
++			circle_dot_top += scroll_line;
++			if(circle_dot_top >= RES_Y) {
++				circle_dot_top -= RES_Y;
++			}
++			circle_dot_put(size);
++		}
++	}
++}
++
++void pascal circle_tiles_invalidate(
++	screen_x_t center_x, screen_y_t center_y, pixel_t radius, int angle_step
++)
++{
++	unsigned int i;
++	unsigned char angle;
++	unsigned char size = ((radius >> 6) + 1);
++	for(i = 0; i < 0x100; i += angle_step) {
++		angle = i;
++		screen_x_t left = polar_x_fast(center_x, radius, angle);
++		screen_y_t top = polar_y_fast(center_y, radius, angle);
++		if((left < 0x1A0) && (left > 0x18) && (top > 8) && (top < 0x180)) {
++			tiles_invalidate_rect(left, top, size, size);
++		}
++	}
++}
+diff --git a/th02_main.asm b/th02_main.asm
+index 774860d5..86cf94b8 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -341,7 +341,8 @@ sub_3E1C	endp
+ 
+ ; Attributes: bp-based frame
+ 
+-sub_3E6A	proc far
++public @CIRCLE_DOT_PUT$QI
++@CIRCLE_DOT_PUT$QI	proc far
+ 
+ var_2		= word ptr -2
+ arg_0		= word ptr  6
+@@ -355,15 +356,15 @@ arg_0		= word ptr  6
+ 		mov	es, ax
+ 		assume es:nothing
+ 		mov	si, [bp+arg_0]
+-		mov	ax, word_20164
++		mov	ax, _circle_dot_left
+ 		sar	ax, 3
+-		mov	dx, word_20166
++		mov	dx, _circle_dot_top
+ 		shl	dx, 6
+ 		add	ax, dx
+ 		shr	dx, 2
+ 		add	ax, dx
+ 		mov	di, ax
+-		mov	bx, word_20164
++		mov	bx, _circle_dot_left
+ 		and	bx, 7
+ 		mov	al, [si+8EEh]
+ 		mov	ah, 0
+@@ -390,7 +391,7 @@ loc_3EB8:
+ 		pop	si
+ 		leave
+ 		retf	2
+-sub_3E6A	endp
++@CIRCLE_DOT_PUT$QI	endp
+ 
+ 
+ ; =============== S U B	R O U T	I N E =======================================
+@@ -405,9 +406,9 @@ arg_0		= word ptr  4
+ 		mov	bp, sp
+ 		push	si
+ 		mov	si, [bp+arg_0]
+-		mov	ax, word_20164
++		mov	ax, _circle_dot_left
+ 		sar	ax, 3
+-		mov	dx, word_20166
++		mov	dx, _circle_dot_top
+ 		shl	dx, 6
+ 		add	ax, dx
+ 		shr	dx, 2
+@@ -463,10 +464,10 @@ loc_3F15:
+ 		mov	bx, ax
+ 		mov	ax, [bx+si+2]
+ 		sar	ax, 4
+-		mov	word_20164, ax
++		mov	_circle_dot_left, ax
+ 		mov	ax, [bx+si+4]
+ 		sar	ax, 4
+-		mov	word_20166, ax
++		mov	_circle_dot_top, ax
+ 		cmp	_reduce_effects, 0
+ 		jz	short loc_3F4B
+ 		mov	al, _page_back
+@@ -586,10 +587,10 @@ loc_3FC1:
+ 		add	[bx+si+4], dx
+ 		mov	dx, [bx+si+2]
+ 		sar	dx, 4
+-		mov	word_20164, dx
++		mov	_circle_dot_left, dx
+ 		mov	ax, [bx+si+4]
+ 		sar	ax, 4
+-		mov	word_20166, ax
++		mov	_circle_dot_top, ax
+ 		cmp	dx, 1A0h
+ 		jge	short loc_402B
+ 		cmp	dx, 18h
+@@ -640,7 +641,7 @@ loc_406E:
+ 		mov	al, [si+0Ah]
+ 		mov	ah, 0
+ 		push	ax
+-		call	sub_3E6A
++		call	@CIRCLE_DOT_PUT$QI
+ 
+ loc_4078:
+ 		inc	[bp+var_2]
+@@ -5924,7 +5925,7 @@ loc_10025:
+ 		push	[bp+arg_2]
+ 		push	dx
+ 		push	2
+-		call	sub_1C341
++		call	@CIRCLE_TILES_INVALIDATE$QIIII
+ 		add	[bp+arg_0], 2
+ 		call	egc_off
+ 
+@@ -5949,7 +5950,7 @@ loc_1005C:
+ 		push	[bp+arg_2]
+ 		push	dx
+ 		push	2
+-		call	sub_1C287
++		call	@CIRCLE_DOTS_PUT$QIIII
+ 		call	grcg_off
+ 		jmp	loc_10286
+ ; ---------------------------------------------------------------------------
+@@ -10157,10 +10158,10 @@ loc_13630:
+ 		sub	si, RES_Y
+ 
+ loc_1364A:
+-		mov	word_20164, di
+-		mov	word_20166, si
++		mov	_circle_dot_left, di
++		mov	_circle_dot_top, si
+ 		push	2
+-		call	sub_3E6A
++		call	@CIRCLE_DOT_PUT$QI
+ 
+ loc_13659:
+ 		inc	[bp+var_2]
+@@ -15742,7 +15743,7 @@ loc_167A0:
+ 		imul	ax, 0Eh
+ 		add	ax, 2
+ 		push	ax
+-		call	sub_1C287
++		call	@CIRCLE_DOTS_PUT$QIIII
+ 		inc	si
+ 		mov	al, [bp+var_1]
+ 		add	al, 80h
+@@ -17911,7 +17912,7 @@ loc_17AA9:
+ 		imul	eax, edx
+ 		sar	eax, 8
+ 		add	ax, 0E0h
+-		mov	word_20164, ax
++		mov	_circle_dot_left, ax
+ 		mov	al, [bp+arg_6]
+ 		add	[bp+@@angle], al
+ 		movzx	eax, byte_26CC1
+@@ -17923,19 +17924,19 @@ loc_17AA9:
+ 		imul	eax, edx
+ 		sar	eax, 8
+ 		add	ax, 0C8h
+-		mov	word_20166, ax
+-		cmp	word_20164, 1A0h
++		mov	_circle_dot_top, ax
++		cmp	_circle_dot_left, 1A0h
+ 		jge	short loc_17B24
+-		cmp	word_20164, 18h
++		cmp	_circle_dot_left, 18h
+ 		jle	short loc_17B24
+-		cmp	word_20166, 8
++		cmp	_circle_dot_top, 8
+ 		jle	short loc_17B24
+-		cmp	word_20166, 180h
++		cmp	_circle_dot_top, 180h
+ 		jge	short loc_17B24
+ 		mov	al, [bp+var_4]
+ 		mov	ah, 0
+ 		push	ax
+-		call	sub_3E6A
++		call	@CIRCLE_DOT_PUT$QI
+ 
+ loc_17B24:
+ 		cmp	[bp+arg_2], 0
+@@ -20634,7 +20635,7 @@ loc_194E9:
+ 		mov	ah, 0
+ 		push	ax
+ 		push	10h
+-		call	sub_1C287
++		call	@CIRCLE_DOTS_PUT$QIIII
+ 		inc	si
+ 		mov	al, [bp+var_1]
+ 		add	al, 80h
+@@ -25420,179 +25421,8 @@ main_03__TEXT	ends
+ 
+ ; Segment type:	Pure code
+ main_04_TEXT	segment	byte public 'CODE' use16
+-		assume cs:main_04_TEXT
+-		;org 7
+-		assume es:nothing, ss:nothing, ds:_DATA, fs:nothing, gs:nothing
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sub_1C287	proc far
+-
+-var_4		= byte ptr -4
+-@@angle		= byte ptr -3
+-var_2		= word ptr -2
+-arg_0		= word ptr  6
+-arg_2		= word ptr  8
+-arg_4		= word ptr  0Ah
+-arg_6		= word ptr  0Ch
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		push	si
+-		push	di
+-		mov	di, [bp+arg_6]
+-		mov	si, [bp+arg_2]
+-		mov	ax, si
+-		sar	ax, 6
+-		inc	al
+-		mov	[bp+var_4], al
+-		mov	[bp+var_2], 0
+-		jmp	loc_1C332
+-; ---------------------------------------------------------------------------
+-
+-loc_1C2A7:
+-		mov	al, byte ptr [bp+var_2]
+-		mov	[bp+@@angle], al
+-		movsx	eax, si
+-		mov	dl, [bp+@@angle]
+-		mov	dh, 0
+-		add	dx, dx
+-		mov	bx, dx
+-		movsx	edx, _CosTable8[bx]
+-		imul	eax, edx
+-		sar	eax, 8
+-		add	ax, di
+-		mov	word_20164, ax
+-		movsx	eax, si
+-		mov	dl, [bp+@@angle]
+-		mov	dh, 0
+-		add	dx, dx
+-		mov	bx, dx
+-		movsx	edx, _SinTable8[bx]
+-		imul	eax, edx
+-		sar	eax, 8
+-		add	ax, [bp+arg_4]
+-		mov	word_20166, ax
+-		cmp	word_20164, 1A0h
+-		jge	short loc_1C32C
+-		cmp	word_20164, 18h
+-		jle	short loc_1C32C
+-		cmp	word_20166, 8
+-		jle	short loc_1C32C
+-		cmp	word_20166, 180h
+-		jge	short loc_1C32C
+-		mov	ax, _scroll_line
+-		add	word_20166, ax
+-		cmp	word_20166, RES_Y
+-		jl	short loc_1C321
+-		sub	word_20166, RES_Y
+-
+-loc_1C321:
+-		mov	al, [bp+var_4]
+-		mov	ah, 0
+-		push	ax
+-		call	sub_3E6A
+-
+-loc_1C32C:
+-		mov	ax, [bp+arg_0]
+-		add	[bp+var_2], ax
+-
+-loc_1C332:
+-		cmp	[bp+var_2], 100h
+-		jb	loc_1C2A7
+-		pop	di
+-		pop	si
+-		leave
+-		retf	8
+-sub_1C287	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sub_1C341	proc far
+-
+-var_4		= byte ptr -4
+-@@angle		= byte ptr -3
+-var_2		= word ptr -2
+-arg_0		= word ptr  6
+-arg_2		= word ptr  8
+-arg_4		= word ptr  0Ah
+-arg_6		= word ptr  0Ch
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 4
+-		push	si
+-		push	di
+-		mov	ax, [bp+arg_2]
+-		sar	ax, 6
+-		inc	al
+-		mov	[bp+var_4], al
+-		mov	[bp+var_2], 0
+-		jmp	short loc_1C3D2
+-; ---------------------------------------------------------------------------
+-
+-loc_1C35B:
+-		mov	al, byte ptr [bp+var_2]
+-		mov	[bp+@@angle], al
+-		movsx	eax, [bp+arg_2]
+-		mov	dl, [bp+@@angle]
+-		mov	dh, 0
+-		add	dx, dx
+-		mov	bx, dx
+-		movsx	edx, _CosTable8[bx]
+-		imul	eax, edx
+-		sar	eax, 8
+-		add	ax, [bp+arg_6]
+-		mov	si, ax
+-		movsx	eax, [bp+arg_2]
+-		mov	dl, [bp+@@angle]
+-		mov	dh, 0
+-		add	dx, dx
+-		mov	bx, dx
+-		movsx	edx, _SinTable8[bx]
+-		imul	eax, edx
+-		sar	eax, 8
+-		add	ax, [bp+arg_4]
+-		mov	di, ax
+-		cmp	si, 1A0h
+-		jge	short loc_1C3CC
+-		cmp	si, 18h
+-		jle	short loc_1C3CC
+-		cmp	di, 8
+-		jle	short loc_1C3CC
+-		cmp	di, 180h
+-		jge	short loc_1C3CC
+-		push	si	; left
+-		push	ax	; top
+-		mov	al, [bp+var_4]
+-		mov	ah, 0
+-		push	ax	; w
+-		mov	al, [bp+var_4]
+-		mov	ah, 0
+-		push	ax	; h
+-		call	@tiles_invalidate_rect$qiiii
+-
+-loc_1C3CC:
+-		mov	ax, [bp+arg_0]
+-
+-loc_1C3CF:
+-		add	[bp+var_2], ax
+-
+-loc_1C3D2:
+-		cmp	[bp+var_2], 100h
+-		jb	short loc_1C35B
+-		pop	di
+-		pop	si
+-		leave
+-		retf	8
+-sub_1C341	endp
+-
++	extern @CIRCLE_DOTS_PUT$QIIII:proc
++	extern @CIRCLE_TILES_INVALIDATE$QIIII:proc
+ main_04_TEXT	ends
+ 
+ ; ===========================================================================
+@@ -26836,8 +26666,9 @@ byte_1FFF8	db ?
+ byte_1FFF9	db ?
+ byte_1FFFA	db ?
+ 		db 361 dup(?)
+-word_20164	dw ?
+-word_20166	dw ?
++public _circle_dot_left, _circle_dot_top
++_circle_dot_left	dw ?
++_circle_dot_top	dw ?
+ byte_20168	db ?
+ byte_20169	db ?
+ include th02/math/randring[bss].asm
