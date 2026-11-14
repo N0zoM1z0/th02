@@ -1,0 +1,1279 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 23:14:42 +0100
+Subject: [PATCH] Restore the original TU boundaries around main_01b/main_01c
+
+main_01a and the stage loop up to DemoPlay() are one TU; the random
+number ring, cfg_load(), the game over menu, GameExecl()/sub_C5B0() and
+player_invalidate() are separate ones. Each original TU's relocations
+form their own LEDATA chunks in the target's relocation table.
+---
+ Tupfile.lua       |   5 +-
+ th02/main_01a.cpp | 340 ++++++++++++++++++++++++++++++++++++++++
+ th02/main_01b.cpp | 388 ----------------------------------------------
+ th02/main_01c.cpp | 163 +------------------
+ th02/main_01d.cpp | 128 +++++++++++++++
+ th02/main_01e.cpp |  69 +++++++++
+ th02/main_cfg.cpp |  60 +++++++
+ th02/main_rr.cpp  |  23 +++
+ 8 files changed, 625 insertions(+), 551 deletions(-)
+ delete mode 100644 th02/main_01b.cpp
+ create mode 100644 th02/main_01d.cpp
+ create mode 100644 th02/main_01e.cpp
+ create mode 100644 th02/main_cfg.cpp
+ create mode 100644 th02/main_rr.cpp
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index c253eb05..d9fb2c0e 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -521,8 +521,11 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/spark_i.asm",
+ 	"th02/tile.cpp",
+ 	"th02/main_01a.cpp",
+-	"th02/main_01b.cpp",
++	"th02/main_rr.cpp",
++	"th02/main_cfg.cpp",
+ 	"th02/main_01c.cpp",
++	"th02/main_01d.cpp",
++	"th02/main_01e.cpp",
+ 	"th02/pointnum.cpp",
+ 	"th02/main/pointnum/num_put_m.asm",
+ 	"th02/main/player/shot.cpp",
+diff --git a/th02/main_01a.cpp b/th02/main_01a.cpp
+index 49effdaa..2298527a 100644
+--- a/th02/main_01a.cpp
++++ b/th02/main_01a.cpp
+@@ -44,6 +44,15 @@
+ static const unsigned char CONTINUE_INVINCIBILITY_FRAMES = 200;
+ 
+ #include "th02/main/null.hpp"
++#include "decomp.hpp"
++#include "platform/x86real/pc98/egc.hpp"
++#include "th02/main/main.hpp"
++#include "th02/main/spark.hpp"
++#include "th02/main/player/bomb.hpp"
++#define DEMO_N 7000 /* ZUN symbol [MAGNet2010] */
++extern int demo_frame;
++extern input_t *DemoBuf; /* ZUN symbol [MAGNet2010] */
++#include "th01/hardware/egc_impl.hpp"
+ 
+ typedef void (far *voidfunc_t)(void);
+ typedef int (far *intfunc_t)(void);
+@@ -556,3 +565,334 @@ int near pause_menu(void)
+ 		frame_delay(1);
+ 	}
+ }
++
++// The stage loop and its callbacks follow in the same TU, compiled with -G.
++#pragma option -G
++
++void bullets_update_and_render(void);
++void bullets_invalidate(void);
++void near egc_start_copy_1(void);
++void near items_invalidate(void);
++void near player_update_and_render(void);
++
++extern void (far *farfp_1F498)(void);
++extern void (far *farfp_1F4A0)(void);
++extern void (far *farfp_23A72)(void);
++extern void (far *farfp_23A76)(void);
++extern void (far *farfp_26C3C)(void);
++extern void (far *farfp_26C40)(void);
++
++// Scroll position for each VRAM page.
++struct scroll_line_on_page_t {
++	vram_y_t v[PAGE_COUNT];
++};
++extern const scroll_line_on_page_t SCROLL_LINE_ON_PAGE_INIT;
++
++extern uint8_t scroll_speed_this_frame;
++extern vram_offset_t scroll_line_vo;
++extern int tile_rows_scrolled;
++extern int16_t tile_row_scrolled;
++extern int midboss_tile_row;
++
++void near bgm_show(void);
++void near sub_E2D9(void);
++void near player_controls_update(void);
++int near pause_menu(void);
++void sub_16D9B(void);
++extern "C" void pascal DemoPlay(void);
++
++#define egc_off_after_copy() { \
++	outport2(EGC_ACTIVEPLANEREG, 0xFFF0); \
++	outport2(EGC_MASKREG, 0xFFFF); \
++	graph_mode_change(true); \
++	graph_mode_egc(false); \
++	_outportb_(0x7C, GC_OFF); \
++	graph_mode_change(false); \
++}
++
++// `JMP SHORT $+2`, as an I/O delay.
++#define io_delay() __emit__(0xEB, 0x00)
++
++inline void playperf_raise_over_time(void) {
++	if((stage_frame % 1800) == 1500) {
++		if(playperf_max > playperf) {
++			playperf++;
++		}
++	}
++}
++
++int stage_loop(void)
++{
++	pixel_t gdc_lines;
++	vram_offset_t gdc_start;
++	scroll_line_on_page_t scroll_line_on_page = SCROLL_LINE_ON_PAGE_INIT;
++	vram_y_t scroll_line_prev;
++
++	while(!quit) {
++		snd_se_update();
++		farfp_1F498();
++		bgm_show();
++		scroll_line_prev = scroll_line;
++		scroll_line = scroll_line_on_page.v[page_back];
++		boss_bg_render();
++		if(midboss_active) {
++			midboss_active = midboss_invalidate();
++		}
++		farfp_26C3C();
++		player_invalidate();
++		bullets_invalidate();
++		farfp_23A72();
++		items_invalidate();
++		sparks_invalidate();
++		sub_E2D9();
++		if(tile_row_scrolled) {
++			sub_16D9B();
++			tile_row_scrolled = 0;
++		}
++		egc_start_copy_1();
++		farfp_1F4A0();
++		tiles_egc_render();
++		farfp_1F490();
++		egc_off_after_copy();
++		if(tile_rows_scrolled == midboss_tile_row) {
++			midboss_active = true;
++		}
++		scroll_speed_this_frame = 0;
++		scroll_line = scroll_line_prev;
++		if(!scroll_done && ((scroll_cycle % scroll_interval) == 0)) {
++			scroll_line -= scroll_speed;
++			if(scroll_line < 0) {
++				scroll_line += RES_Y;
++			}
++			scroll_speed_this_frame = scroll_speed;
++		}
++		scroll_line_on_page.v[page_back] = scroll_line;
++		input_reset_sense();
++		if(resident->demo_num != 0) {
++			DemoPlay();
++		}
++		player_controls_update();
++		bomb_update_and_render();
++		farfp_26C40();
++		stage_progression = static_cast<stage_progression_t>(boss_update());
++		if(midboss_active) {
++			midboss_update_and_render();
++		}
++		player_update_and_render();
++		items_update_and_render();
++		farfp_23A76();
++		bullets_update_and_render();
++		sparks_update_and_render();
++		if((key_det & INPUT_CANCEL) && pause_menu()) {
++			quit = true;
++		}
++		if(scroll_speed_this_frame) {
++			scroll_line_vo = ((scroll_line << 5) + (scroll_line << 3));
++			if((scroll_line & 7) == 0) {
++				tile_rows_scrolled++;
++				tile_row_scrolled = 1;
++			}
++			egc_start_copy_1();
++			scroll_done = tiles_scroll_and_egc_render_both(scroll_speed);
++			egc_off_after_copy();
++			if(scroll_done) {
++				// ZUN bug: See the comment in the original assembly.
++				scroll_line++;
++				goto frame_end;
++			}
++			gdc_lines = (RES_Y - scroll_line);
++			gdc_start = scroll_line_vo;
++			_CX = graph_VramZoom;
++			_CL = 4;
++gdc_wait:
++			io_delay();
++			asm { in al, 0xA0; test al, cl; jz gdc_wait }
++			asm { mov al, 0x70; out 0xA2, al }
++
++			asm { mov ax, gdc_start; out 0xA0, al; mov al, ah }
++			io_delay();
++			io_delay();
++			asm { out 0xA0, al }
++
++			asm { mov ax, gdc_lines; shl ax, cl; or ah, ch; out 0xA0, al; mov al, ah }
++			io_delay();
++			io_delay();
++			asm { out 0xA0, al }
++
++			asm { mov ax, 0; out 0xA0, al; mov al, ah }
++			io_delay();
++			io_delay();
++			asm { out 0xA0, al }
++
++			asm { mov ax, RES_Y; shl ax, cl; or ah, ch; out 0xA0, al; mov al, ah }
++			io_delay();
++			io_delay();
++			asm { out 0xA0, al }
++			if(scroll_done) {
++				goto frame_end;
++			}
++		}
++		scroll_cycle++;
++frame_end:
++		if(slowdown_factor == 1) {
++			vsync_Count1 = 0;
++		}
++		while(slowdown_factor > vsync_Count1) {
++		}
++		vsync_Count1 = 0;
++		_outportb_(0xA4, page_front = page_back);
++		page_back ^= 1;
++		_outportb_(0xA6, page_back);
++		farfp_1F494();
++		resident->frame++;
++		stage_frame++;
++		if(farfp_1F48C() && !quit) {
++			return 1;
++		}
++		playperf_raise_over_time();
++		score_update_and_render();
++	}
++	score_delta_commit();
++	quit = false;
++	return 0;
++}
++
++// Segment 1, after the stage loop
++// -------------------------------
++
++extern "C" void pascal near text_wipe(void)
++{
++	text_clear();
++	text_fillca(' ', (TX_BLACK | TX_REVERSE));
++}
++
++void nullfunc_void(void)
++{
++}
++
++int nullfunc_false(void)
++{
++	return false;
++}
++
++extern uint8_t bgm_show_timer;
++extern uint8_t bgm_title_id;
++extern uint8_t byte_1F46E;
++extern const char near *BGM_TITLES[];
++extern const char aEMPTY[];
++void sub_17A55(void);
++void sub_16A8A(void);
++
++int sub_BF9C(void)
++{
++	if(stage_progression == SP_CLEAR) {
++		if(stage_id == 2) {
++			Palettes[0].c.r = 0;
++			Palettes[0].c.g = 0;
++			Palettes[0].c.b = 0;
++			palette_show();
++		}
++		boss_end();
++		return 1;
++	}
++	return 0;
++}
++
++void sub_BFD0(void)
++{
++	if(scroll_done == true) {
++		stage_progression = SP_BOSS;
++		if(stage_id == 3) {
++			farfp_1F490 = nullfunc_void;
++		} else if(stage_id == 2) {
++			Palettes[0].c.r = 0;
++			Palettes[0].c.g = 0;
++			Palettes[0].c.b = 0;
++			palette_show();
++		}
++		boss_init();
++		sub_17A55();
++		sub_16A8A();
++		farfp_1F494 = nullfunc_void;
++		boss_bg_render = boss_bg_render_func;
++		boss_update = boss_update_func;
++		farfp_1F48C = sub_BF9C;
++		scroll_cycle = -1;
++		bgm_show_timer = 1;
++		bgm_title_id = byte_1F46E;
++	}
++}
++
++void sub_C05D(void)
++{
++	if(stage_frame == 160) {
++		if(resident->demo_num == 0) {
++			text_putsa(4, 12, aEMPTY, TX_WHITE);
++			text_putsa(4, 13, aEMPTY, TX_WHITE);
++		}
++		farfp_1F498 = nullfunc_void;
++	}
++}
++
++void near bgm_show(void)
++{
++	if(bgm_show_timer) {
++		if(bgm_show_timer == 1) {
++			gaiji_putca(24, 23, gs_NOTES, TX_YELLOW);
++			text_putsa(26, 23, BGM_TITLES[bgm_title_id], TX_WHITE);
++		}
++		bgm_show_timer++;
++		if(bgm_show_timer >= 160) {
++			text_putsa(24, 23, &aEMPTY[22], TX_WHITE);
++			bgm_show_timer = 0;
++		}
++	}
++}
++
++void near egc_start_copy_1(void)
++{
++	egc_on();
++	egc_setup_copy();
++}
++
++extern const char aDemo1_rec[];
++extern const char aDemo2_rec[];
++extern const char aDemo3_rec[];
++
++void demo_load(void)
++{
++	DemoBuf = reinterpret_cast<input_t far *>(hmem_allocbyte(DEMO_N * 2));
++	power = POWER_MAX;
++	playperf = 12;
++	resident->frame = 18;
++	if(resident->demo_num == 1) {
++		stage_id = 3;
++		file_ropen(aDemo1_rec);
++		resident->shottype = 0;
++	} else if(resident->demo_num == 2) {
++		stage_id = 2;
++		file_ropen(aDemo2_rec);
++		resident->shottype = 2;
++	} else if(resident->demo_num == 3) {
++		stage_id = 1;
++		file_ropen(aDemo3_rec);
++		resident->shottype = 1;
++	}
++	file_read(DemoBuf, (DEMO_N * 2));
++	file_close();
++}
++
++extern "C" void pascal DemoPlay(void)
++{
++	if(key_det == 0) {
++		key_det = DemoBuf[demo_frame];
++		demo_frame++;
++		if(demo_frame < (DEMO_N - 50)) {
++			return;
++		}
++	}
++	key_det = 0;
++	palette_black_out(10);
++	quit = true;
++	snd_se_reset();
++}
+diff --git a/th02/main_01b.cpp b/th02/main_01b.cpp
+deleted file mode 100644
+index 53c6c365..00000000
+--- a/th02/main_01b.cpp
++++ /dev/null
+@@ -1,388 +0,0 @@
+-/* ReC98
+- * -----
+- * Stage loop of TH02's MAIN.EXE, the second translation unit of code segment
+- * #1
+- */
+-
+-#pragma option -zCmain_01_TEXT -zPmain_01 -G
+-
+-#include "platform.h"
+-#include "x86real.h"
+-#include "pc98.h"
+-#include "decomp.hpp"
+-#include "libs/master.lib/master.hpp"
+-#include "libs/master.lib/pc98_gfx.hpp"
+-#include "platform/x86real/pc98/egc.hpp"
+-#include "th02/resident.hpp"
+-#include "th02/hardware/input.hpp"
+-#include "th02/hardware/pages.hpp"
+-#include "th02/snd/snd.h"
+-#include "th02/main/frames.hpp"
+-#include "th02/main/main.hpp"
+-#include "th02/main/playperf.hpp"
+-#include "th02/main/score.hpp"
+-#include "th02/main/scroll.hpp"
+-#include "th02/main/slowdown.hpp"
+-#include "th02/main/spark.hpp"
+-#include "th02/main/item/item.hpp"
+-#include "th02/main/player/bomb.hpp"
+-#include "th02/main/player/player.hpp"
+-#include "th02/main/stage/stage.hpp"
+-#include "th02/main/tile/tile.hpp"
+-#include "th02/main/midboss/midboss.hpp"
+-#include "th02/main/null.hpp"
+-#define DEMO_N 7000 /* ZUN symbol [MAGNet2010] */
+-extern int demo_frame;
+-extern input_t *DemoBuf; /* ZUN symbol [MAGNet2010] */
+-#include "th02/gaiji/gaiji.h"
+-#include "th02/math/randring.hpp"
+-#include "th01/hardware/egc_impl.hpp"
+-
+-void bullets_update_and_render(void);
+-void bullets_invalidate(void);
+-void near egc_start_copy_1(void);
+-void near items_invalidate(void);
+-void near player_update_and_render(void);
+-
+-extern void (far *boss_bg_render)(void);
+-extern stage_progression_t (far *boss_update)(void);
+-extern int (far *farfp_1F48C)(void);
+-extern void (far *farfp_1F490)(void);
+-extern void (far *farfp_1F494)(void);
+-extern void (far *farfp_1F498)(void);
+-extern void (far *farfp_1F4A0)(void);
+-extern void (far *farfp_23A72)(void);
+-extern void (far *farfp_23A76)(void);
+-extern void (far *farfp_26C3C)(void);
+-extern void (far *farfp_26C40)(void);
+-
+-// Scroll position for each VRAM page.
+-struct scroll_line_on_page_t {
+-	vram_y_t v[PAGE_COUNT];
+-};
+-extern const scroll_line_on_page_t SCROLL_LINE_ON_PAGE_INIT;
+-
+-extern uint8_t scroll_speed_this_frame;
+-extern vram_offset_t scroll_line_vo;
+-extern int tile_rows_scrolled;
+-extern int16_t tile_row_scrolled;
+-extern int midboss_tile_row;
+-
+-void near bgm_show(void);
+-void near sub_E2D9(void);
+-void near player_controls_update(void);
+-int near pause_menu(void);
+-void sub_16D9B(void);
+-extern "C" void pascal DemoPlay(void);
+-
+-#define egc_off_after_copy() { \
+-	outport2(EGC_ACTIVEPLANEREG, 0xFFF0); \
+-	outport2(EGC_MASKREG, 0xFFFF); \
+-	graph_mode_change(true); \
+-	graph_mode_egc(false); \
+-	_outportb_(0x7C, GC_OFF); \
+-	graph_mode_change(false); \
+-}
+-
+-// `JMP SHORT $+2`, as an I/O delay.
+-#define io_delay() __emit__(0xEB, 0x00)
+-
+-inline void playperf_raise_over_time(void) {
+-	if((stage_frame % 1800) == 1500) {
+-		if(playperf_max > playperf) {
+-			playperf++;
+-		}
+-	}
+-}
+-
+-int stage_loop(void)
+-{
+-	pixel_t gdc_lines;
+-	vram_offset_t gdc_start;
+-	scroll_line_on_page_t scroll_line_on_page = SCROLL_LINE_ON_PAGE_INIT;
+-	vram_y_t scroll_line_prev;
+-
+-	while(!quit) {
+-		snd_se_update();
+-		farfp_1F498();
+-		bgm_show();
+-		scroll_line_prev = scroll_line;
+-		scroll_line = scroll_line_on_page.v[page_back];
+-		boss_bg_render();
+-		if(midboss_active) {
+-			midboss_active = midboss_invalidate();
+-		}
+-		farfp_26C3C();
+-		player_invalidate();
+-		bullets_invalidate();
+-		farfp_23A72();
+-		items_invalidate();
+-		sparks_invalidate();
+-		sub_E2D9();
+-		if(tile_row_scrolled) {
+-			sub_16D9B();
+-			tile_row_scrolled = 0;
+-		}
+-		egc_start_copy_1();
+-		farfp_1F4A0();
+-		tiles_egc_render();
+-		farfp_1F490();
+-		egc_off_after_copy();
+-		if(tile_rows_scrolled == midboss_tile_row) {
+-			midboss_active = true;
+-		}
+-		scroll_speed_this_frame = 0;
+-		scroll_line = scroll_line_prev;
+-		if(!scroll_done && ((scroll_cycle % scroll_interval) == 0)) {
+-			scroll_line -= scroll_speed;
+-			if(scroll_line < 0) {
+-				scroll_line += RES_Y;
+-			}
+-			scroll_speed_this_frame = scroll_speed;
+-		}
+-		scroll_line_on_page.v[page_back] = scroll_line;
+-		input_reset_sense();
+-		if(resident->demo_num != 0) {
+-			DemoPlay();
+-		}
+-		player_controls_update();
+-		bomb_update_and_render();
+-		farfp_26C40();
+-		stage_progression = boss_update();
+-		if(midboss_active) {
+-			midboss_update_and_render();
+-		}
+-		player_update_and_render();
+-		items_update_and_render();
+-		farfp_23A76();
+-		bullets_update_and_render();
+-		sparks_update_and_render();
+-		if((key_det & INPUT_CANCEL) && pause_menu()) {
+-			quit = true;
+-		}
+-		if(scroll_speed_this_frame) {
+-			scroll_line_vo = ((scroll_line << 5) + (scroll_line << 3));
+-			if((scroll_line & 7) == 0) {
+-				tile_rows_scrolled++;
+-				tile_row_scrolled = 1;
+-			}
+-			egc_start_copy_1();
+-			scroll_done = tiles_scroll_and_egc_render_both(scroll_speed);
+-			egc_off_after_copy();
+-			if(scroll_done) {
+-				// ZUN bug: See the comment in the original assembly.
+-				scroll_line++;
+-				goto frame_end;
+-			}
+-			gdc_lines = (RES_Y - scroll_line);
+-			gdc_start = scroll_line_vo;
+-			_CX = graph_VramZoom;
+-			_CL = 4;
+-gdc_wait:
+-			io_delay();
+-			asm { in al, 0xA0; test al, cl; jz gdc_wait }
+-			asm { mov al, 0x70; out 0xA2, al }
+-
+-			asm { mov ax, gdc_start; out 0xA0, al; mov al, ah }
+-			io_delay();
+-			io_delay();
+-			asm { out 0xA0, al }
+-
+-			asm { mov ax, gdc_lines; shl ax, cl; or ah, ch; out 0xA0, al; mov al, ah }
+-			io_delay();
+-			io_delay();
+-			asm { out 0xA0, al }
+-
+-			asm { mov ax, 0; out 0xA0, al; mov al, ah }
+-			io_delay();
+-			io_delay();
+-			asm { out 0xA0, al }
+-
+-			asm { mov ax, RES_Y; shl ax, cl; or ah, ch; out 0xA0, al; mov al, ah }
+-			io_delay();
+-			io_delay();
+-			asm { out 0xA0, al }
+-			if(scroll_done) {
+-				goto frame_end;
+-			}
+-		}
+-		scroll_cycle++;
+-frame_end:
+-		if(slowdown_factor == 1) {
+-			vsync_Count1 = 0;
+-		}
+-		while(slowdown_factor > vsync_Count1) {
+-		}
+-		vsync_Count1 = 0;
+-		_outportb_(0xA4, page_front = page_back);
+-		page_back ^= 1;
+-		_outportb_(0xA6, page_back);
+-		farfp_1F494();
+-		resident->frame++;
+-		stage_frame++;
+-		if(farfp_1F48C() && !quit) {
+-			return 1;
+-		}
+-		playperf_raise_over_time();
+-		score_update_and_render();
+-	}
+-	score_delta_commit();
+-	quit = false;
+-	return 0;
+-}
+-
+-// Segment 1, after the stage loop
+-// -------------------------------
+-
+-extern "C" void pascal near text_wipe(void)
+-{
+-	text_clear();
+-	text_fillca(' ', (TX_BLACK | TX_REVERSE));
+-}
+-
+-void nullfunc_void(void)
+-{
+-}
+-
+-int nullfunc_false(void)
+-{
+-	return false;
+-}
+-
+-extern void (far *boss_init)(void);
+-extern void (far *boss_end)(void);
+-extern void (far *boss_bg_render_func)(void);
+-extern stage_progression_t (far *boss_update_func)(void);
+-extern uint8_t bgm_show_timer;
+-extern uint8_t bgm_title_id;
+-extern uint8_t byte_1F46E;
+-extern const char near *BGM_TITLES[];
+-extern const char aEMPTY[];
+-void sub_17A55(void);
+-void sub_16A8A(void);
+-
+-int sub_BF9C(void)
+-{
+-	if(stage_progression == SP_CLEAR) {
+-		if(stage_id == 2) {
+-			Palettes[0].c.r = 0;
+-			Palettes[0].c.g = 0;
+-			Palettes[0].c.b = 0;
+-			palette_show();
+-		}
+-		boss_end();
+-		return 1;
+-	}
+-	return 0;
+-}
+-
+-void sub_BFD0(void)
+-{
+-	if(scroll_done == true) {
+-		stage_progression = SP_BOSS;
+-		if(stage_id == 3) {
+-			farfp_1F490 = nullfunc_void;
+-		} else if(stage_id == 2) {
+-			Palettes[0].c.r = 0;
+-			Palettes[0].c.g = 0;
+-			Palettes[0].c.b = 0;
+-			palette_show();
+-		}
+-		boss_init();
+-		sub_17A55();
+-		sub_16A8A();
+-		farfp_1F494 = nullfunc_void;
+-		boss_bg_render = boss_bg_render_func;
+-		boss_update = boss_update_func;
+-		farfp_1F48C = sub_BF9C;
+-		scroll_cycle = -1;
+-		bgm_show_timer = 1;
+-		bgm_title_id = byte_1F46E;
+-	}
+-}
+-
+-void sub_C05D(void)
+-{
+-	if(stage_frame == 160) {
+-		if(resident->demo_num == 0) {
+-			text_putsa(4, 12, aEMPTY, TX_WHITE);
+-			text_putsa(4, 13, aEMPTY, TX_WHITE);
+-		}
+-		farfp_1F498 = nullfunc_void;
+-	}
+-}
+-
+-void near bgm_show(void)
+-{
+-	if(bgm_show_timer) {
+-		if(bgm_show_timer == 1) {
+-			gaiji_putca(24, 23, gs_NOTES, TX_YELLOW);
+-			text_putsa(26, 23, BGM_TITLES[bgm_title_id], TX_WHITE);
+-		}
+-		bgm_show_timer++;
+-		if(bgm_show_timer >= 160) {
+-			text_putsa(24, 23, &aEMPTY[22], TX_WHITE);
+-			bgm_show_timer = 0;
+-		}
+-	}
+-}
+-
+-void near egc_start_copy_1(void)
+-{
+-	egc_on();
+-	egc_setup_copy();
+-}
+-
+-extern const char aDemo1_rec[];
+-extern const char aDemo2_rec[];
+-extern const char aDemo3_rec[];
+-
+-void demo_load(void)
+-{
+-	DemoBuf = reinterpret_cast<input_t far *>(hmem_allocbyte(DEMO_N * 2));
+-	power = POWER_MAX;
+-	playperf = 12;
+-	resident->frame = 18;
+-	if(resident->demo_num == 1) {
+-		stage_id = 3;
+-		file_ropen(aDemo1_rec);
+-		resident->shottype = 0;
+-	} else if(resident->demo_num == 2) {
+-		stage_id = 2;
+-		file_ropen(aDemo2_rec);
+-		resident->shottype = 2;
+-	} else if(resident->demo_num == 3) {
+-		stage_id = 1;
+-		file_ropen(aDemo3_rec);
+-		resident->shottype = 1;
+-	}
+-	file_read(DemoBuf, (DEMO_N * 2));
+-	file_close();
+-}
+-
+-extern "C" void pascal DemoPlay(void)
+-{
+-	if(key_det == 0) {
+-		key_det = DemoBuf[demo_frame];
+-		demo_frame++;
+-		if(demo_frame < (DEMO_N - 50)) {
+-			return;
+-		}
+-	}
+-	key_det = 0;
+-	palette_black_out(10);
+-	quit = true;
+-	snd_se_reset();
+-}
+-
+-void near randring_fill(void)
+-{
+-	int i = 0;
+-	do {
+-		randring[i] = irand();
+-		i++;
+-	} while(i < RANDRING_SIZE);
+-}
+-
+-#define RANDRING_INSTANCE 1
+-#include "th02/math/randring.cpp"
+diff --git a/th02/main_01c.cpp b/th02/main_01c.cpp
+index 4f2036ad..08dd0611 100644
+--- a/th02/main_01c.cpp
++++ b/th02/main_01c.cpp
+@@ -1,7 +1,6 @@
+ /* ReC98
+  * -----
+- * Configuration loading, the game over and continue menu, process switching
+- * and player initialization of TH02's MAIN.EXE, at the end of code segment #1
++ * The game over and continue menu of TH02's MAIN.EXE
+  */
+ 
+ #pragma option -zCmain_01_TEXT -zPmain_01
+@@ -33,33 +32,6 @@
+ #include "th02/main/stage/stage.hpp"
+ #include "th02/main/tile/tile.hpp"
+ 
+-extern const char aHuuma_cfg[];
+-
+-int near cfg_load(void)
+-{
+-	resident_t __seg *resident_seg;
+-
+-	file_ropen(aHuuma_cfg);
+-	file_seek(5, 0);
+-	file_read(&resident_seg, sizeof(resident_seg));
+-	file_close();
+-	if(resident_seg) {
+-		resident = resident_seg;
+-		stage_id = resident->stage;
+-		lives = resident->start_lives;
+-		bombs = resident->start_bombs;
+-		rank = resident->rank;
+-		power = resident->start_power;
+-		if(power == 0) {
+-			power++;
+-		}
+-		playperf = 0;
+-		item_bigpower_override = 0;
+-		return 1;
+-	}
+-	return 0;
+-}
+-
+ extern const unsigned char gYES[];
+ extern const unsigned char gNO[];
+ extern const unsigned char gGAMEOVER[];
+@@ -154,136 +126,3 @@ int near gameover_and_continue_menu(void)
+ 	overlay_wipe();
+ 	return choice;
+ }
+-
+-void near sub_E24A(void);
+-void stage_data_free(void);
+-void near gaiji_free(void);
+-void game_exit(void);
+-
+-int GameExecl(char *binary_fn)
+-{
+-	pi_free(0);
+-	sub_E24A();
+-	mpn_free();
+-	stage_data_free();
+-	super_free();
+-	graph_clear();
+-	text_clear();
+-	gaiji_free();
+-	game_exit();
+-	return execl(binary_fn, binary_fn, NULL);
+-}
+-
+-extern uint8_t option_shots_active;
+-extern uint8_t byte_205DF;
+-extern uint8_t byte_205E0;
+-extern uint8_t stage_miss_count;
+-extern int shot_target_left;
+-extern int shot_target_top;
+-extern int shot_target_left_unused;
+-extern uint8_t byte_20611;
+-extern int8_t shot_option_frames_per_age;
+-extern int8_t playchar_speed_aligned_x;
+-extern int8_t playchar_speed_aligned_y;
+-extern int8_t playchar_speed_diagonal_x;
+-extern int8_t playchar_speed_diagonal_y;
+-extern void (near *playchar_shot_func)(void);
+-extern uint8_t shot_max_param_1;
+-extern uint8_t shot_max_param_2;
+-extern int8_t shot_max_spread;
+-void near shot_a(void);
+-void near shot_b(void);
+-void near shot_c(void);
+-
+-void near sub_C5B0(void)
+-{
+-	int i;
+-	for(i = 0; i < SHOT_COUNT; i++) {
+-		shots[i].flag = SF_FREE;
+-	}
+-	option_shots_active = 0;
+-	player_invincibility_time = 0;
+-	player_invincible_via_bomb = false;
+-	quit = false;
+-	stage_miss_count = 0;
+-	miss_frame = 0;
+-	byte_205DF = 8;
+-	byte_205E0 = 0;
+-	player_is_hit = false;
+-	miss_active = false;
+-	player_option_patnum = PAT_OPTION_A;
+-	shot_target_left = -1;
+-	shot_target_left_unused = -1;
+-	shot_target_top = -1;
+-	shot_max_spread = 0;
+-	byte_20611 = 0;
+-	switch(resident->shottype) {
+-	case 0:
+-		playchar_shot_func = shot_a;
+-		playchar_speed_aligned_x = 5;
+-		playchar_speed_aligned_y = 5;
+-		playchar_speed_diagonal_x = 4;
+-		playchar_speed_diagonal_y = 4;
+-		shot_max_param_1 = 48;
+-		break;
+-	case 1:
+-		playchar_shot_func = shot_b;
+-		playchar_speed_aligned_x = 4;
+-		playchar_speed_aligned_y = 4;
+-		playchar_speed_diagonal_x = 3;
+-		playchar_speed_diagonal_y = 3;
+-		shot_max_param_1 = 52;
+-		shot_max_param_2 = 55;
+-		player_option_patnum++;
+-		break;
+-	case 2:
+-		playchar_shot_func = shot_c;
+-		playchar_speed_aligned_x = 3;
+-		playchar_speed_aligned_y = 3;
+-		playchar_speed_diagonal_x = 3;
+-		playchar_speed_diagonal_y = 3;
+-		shot_option_frames_per_age = 3;
+-		shot_max_param_1 = 125;
+-		shot_max_param_2 = 59;
+-		player_option_patnum += 2;
+-		break;
+-	}
+-}
+-
+-#pragma option -G
+-
+-void near shots_invalidate(void);
+-
+-void near player_invalidate(void)
+-{
+-	int unused = 2;
+-	screen_x_t option_left;
+-
+-	shots_invalidate();
+-	player_left_on_back_page = &player_left_on_page[page_back];
+-	player_top_on_back_page = &player_top_on_page[page_back];
+-	player_option_left_left_on_back_page = (
+-		&player_option_left_topleft[page_back].x
+-	);
+-	player_option_left_top_on_back_page = (
+-		&player_option_left_topleft[page_back].y
+-	);
+-	tiles_invalidate_rect(
+-		*player_left_on_back_page, *player_top_on_back_page, PLAYER_W, PLAYER_H
+-	);
+-	option_left = *player_option_left_left_on_back_page;
+-	tiles_invalidate_rect(
+-		option_left,
+-		*player_option_left_top_on_back_page,
+-		PLAYER_OPTION_W,
+-		PLAYER_OPTION_H
+-	);
+-	tiles_invalidate_rect(
+-		(option_left + PLAYER_OPTION_TO_OPTION_DISTANCE),
+-		*player_option_left_top_on_back_page,
+-		PLAYER_OPTION_W,
+-		PLAYER_OPTION_H
+-	);
+-	*player_left_on_back_page = player_left_on_page[page_front];
+-	*player_top_on_back_page = player_top_on_page[page_front];
+-}
+diff --git a/th02/main_01d.cpp b/th02/main_01d.cpp
+new file mode 100644
+index 00000000..b80318e2
+--- /dev/null
++++ b/th02/main_01d.cpp
+@@ -0,0 +1,128 @@
++/* ReC98
++ * -----
++ * Process switching and shot type setup of TH02's MAIN.EXE
++ */
++
++#pragma option -zCmain_01_TEXT -zPmain_01
++
++#include <stddef.h>
++#include <process.h>
++#include "platform.h"
++#include "x86real.h"
++#include "pc98.h"
++#include "libs/master.lib/master.hpp"
++#include "libs/master.lib/pc98_gfx.hpp"
++#include "th02/resident.hpp"
++#include "th01/rank.h"
++#include "th02/core/globals.hpp"
++#include "th02/gaiji/gaiji.h"
++#include "th02/hardware/frmdelay.h"
++#include "th02/hardware/input.hpp"
++#include "th02/hardware/pages.hpp"
++#include "th02/formats/mpn.hpp"
++#include "th02/formats/pi.h"
++#include "th02/hiscore/regist.h"
++#include "th02/main/main.hpp"
++#include "th02/main/playperf.hpp"
++#include "th02/main/score.hpp"
++#include "th02/main/hud/overlay.hpp"
++#include "th02/main/item/item.hpp"
++#include "th02/main/player/player.hpp"
++#include "th02/main/player/shot.hpp"
++#include "th02/main/stage/stage.hpp"
++#include "th02/main/tile/tile.hpp"
++
++void near sub_E24A(void);
++void stage_data_free(void);
++void near gaiji_free(void);
++void game_exit(void);
++
++int GameExecl(char *binary_fn)
++{
++	pi_free(0);
++	sub_E24A();
++	mpn_free();
++	stage_data_free();
++	super_free();
++	graph_clear();
++	text_clear();
++	gaiji_free();
++	game_exit();
++	return execl(binary_fn, binary_fn, NULL);
++}
++
++extern uint8_t option_shots_active;
++extern uint8_t byte_205DF;
++extern uint8_t byte_205E0;
++extern uint8_t stage_miss_count;
++extern int shot_target_left;
++extern int shot_target_top;
++extern int shot_target_left_unused;
++extern uint8_t byte_20611;
++extern int8_t shot_option_frames_per_age;
++extern int8_t playchar_speed_aligned_x;
++extern int8_t playchar_speed_aligned_y;
++extern int8_t playchar_speed_diagonal_x;
++extern int8_t playchar_speed_diagonal_y;
++extern void (near *playchar_shot_func)(void);
++extern uint8_t shot_max_param_1;
++extern uint8_t shot_max_param_2;
++extern int8_t shot_max_spread;
++void near shot_a(void);
++void near shot_b(void);
++void near shot_c(void);
++
++void near sub_C5B0(void)
++{
++	int i;
++	for(i = 0; i < SHOT_COUNT; i++) {
++		shots[i].flag = SF_FREE;
++	}
++	option_shots_active = 0;
++	player_invincibility_time = 0;
++	player_invincible_via_bomb = false;
++	quit = false;
++	stage_miss_count = 0;
++	miss_frame = 0;
++	byte_205DF = 8;
++	byte_205E0 = 0;
++	player_is_hit = false;
++	miss_active = false;
++	player_option_patnum = PAT_OPTION_A;
++	shot_target_left = -1;
++	shot_target_left_unused = -1;
++	shot_target_top = -1;
++	shot_max_spread = 0;
++	byte_20611 = 0;
++	switch(resident->shottype) {
++	case 0:
++		playchar_shot_func = shot_a;
++		playchar_speed_aligned_x = 5;
++		playchar_speed_aligned_y = 5;
++		playchar_speed_diagonal_x = 4;
++		playchar_speed_diagonal_y = 4;
++		shot_max_param_1 = 48;
++		break;
++	case 1:
++		playchar_shot_func = shot_b;
++		playchar_speed_aligned_x = 4;
++		playchar_speed_aligned_y = 4;
++		playchar_speed_diagonal_x = 3;
++		playchar_speed_diagonal_y = 3;
++		shot_max_param_1 = 52;
++		shot_max_param_2 = 55;
++		player_option_patnum++;
++		break;
++	case 2:
++		playchar_shot_func = shot_c;
++		playchar_speed_aligned_x = 3;
++		playchar_speed_aligned_y = 3;
++		playchar_speed_diagonal_x = 3;
++		playchar_speed_diagonal_y = 3;
++		shot_option_frames_per_age = 3;
++		shot_max_param_1 = 125;
++		shot_max_param_2 = 59;
++		player_option_patnum += 2;
++		break;
++	}
++}
+diff --git a/th02/main_01e.cpp b/th02/main_01e.cpp
+new file mode 100644
+index 00000000..b6434ab0
+--- /dev/null
++++ b/th02/main_01e.cpp
+@@ -0,0 +1,69 @@
++/* ReC98
++ * -----
++ * player_invalidate() of TH02's MAIN.EXE, compiled with -G
++ */
++
++#pragma option -zCmain_01_TEXT -zPmain_01 -G
++
++#include <stddef.h>
++#include <process.h>
++#include "platform.h"
++#include "x86real.h"
++#include "pc98.h"
++#include "libs/master.lib/master.hpp"
++#include "libs/master.lib/pc98_gfx.hpp"
++#include "th02/resident.hpp"
++#include "th01/rank.h"
++#include "th02/core/globals.hpp"
++#include "th02/gaiji/gaiji.h"
++#include "th02/hardware/frmdelay.h"
++#include "th02/hardware/input.hpp"
++#include "th02/hardware/pages.hpp"
++#include "th02/formats/mpn.hpp"
++#include "th02/formats/pi.h"
++#include "th02/hiscore/regist.h"
++#include "th02/main/main.hpp"
++#include "th02/main/playperf.hpp"
++#include "th02/main/score.hpp"
++#include "th02/main/hud/overlay.hpp"
++#include "th02/main/item/item.hpp"
++#include "th02/main/player/player.hpp"
++#include "th02/main/player/shot.hpp"
++#include "th02/main/stage/stage.hpp"
++#include "th02/main/tile/tile.hpp"
++
++void near shots_invalidate(void);
++
++void near player_invalidate(void)
++{
++	int unused = 2;
++	screen_x_t option_left;
++
++	shots_invalidate();
++	player_left_on_back_page = &player_left_on_page[page_back];
++	player_top_on_back_page = &player_top_on_page[page_back];
++	player_option_left_left_on_back_page = (
++		&player_option_left_topleft[page_back].x
++	);
++	player_option_left_top_on_back_page = (
++		&player_option_left_topleft[page_back].y
++	);
++	tiles_invalidate_rect(
++		*player_left_on_back_page, *player_top_on_back_page, PLAYER_W, PLAYER_H
++	);
++	option_left = *player_option_left_left_on_back_page;
++	tiles_invalidate_rect(
++		option_left,
++		*player_option_left_top_on_back_page,
++		PLAYER_OPTION_W,
++		PLAYER_OPTION_H
++	);
++	tiles_invalidate_rect(
++		(option_left + PLAYER_OPTION_TO_OPTION_DISTANCE),
++		*player_option_left_top_on_back_page,
++		PLAYER_OPTION_W,
++		PLAYER_OPTION_H
++	);
++	*player_left_on_back_page = player_left_on_page[page_front];
++	*player_top_on_back_page = player_top_on_page[page_front];
++}
+diff --git a/th02/main_cfg.cpp b/th02/main_cfg.cpp
+new file mode 100644
+index 00000000..94e15fe2
+--- /dev/null
++++ b/th02/main_cfg.cpp
+@@ -0,0 +1,60 @@
++/* ReC98
++ * -----
++ * cfg_load() of TH02's MAIN.EXE. Its own TU, like in OP and the ending.
++ */
++
++#pragma option -zCmain_01_TEXT -zPmain_01
++
++#include <stddef.h>
++#include <process.h>
++#include "platform.h"
++#include "x86real.h"
++#include "pc98.h"
++#include "libs/master.lib/master.hpp"
++#include "libs/master.lib/pc98_gfx.hpp"
++#include "th02/resident.hpp"
++#include "th01/rank.h"
++#include "th02/core/globals.hpp"
++#include "th02/gaiji/gaiji.h"
++#include "th02/hardware/frmdelay.h"
++#include "th02/hardware/input.hpp"
++#include "th02/hardware/pages.hpp"
++#include "th02/formats/mpn.hpp"
++#include "th02/formats/pi.h"
++#include "th02/hiscore/regist.h"
++#include "th02/main/main.hpp"
++#include "th02/main/playperf.hpp"
++#include "th02/main/score.hpp"
++#include "th02/main/hud/overlay.hpp"
++#include "th02/main/item/item.hpp"
++#include "th02/main/player/player.hpp"
++#include "th02/main/player/shot.hpp"
++#include "th02/main/stage/stage.hpp"
++#include "th02/main/tile/tile.hpp"
++
++extern const char aHuuma_cfg[];
++
++int near cfg_load(void)
++{
++	resident_t __seg *resident_seg;
++
++	file_ropen(aHuuma_cfg);
++	file_seek(5, 0);
++	file_read(&resident_seg, sizeof(resident_seg));
++	file_close();
++	if(resident_seg) {
++		resident = resident_seg;
++		stage_id = resident->stage;
++		lives = resident->start_lives;
++		bombs = resident->start_bombs;
++		rank = resident->rank;
++		power = resident->start_power;
++		if(power == 0) {
++			power++;
++		}
++		playperf = 0;
++		item_bigpower_override = 0;
++		return 1;
++	}
++	return 0;
++}
+diff --git a/th02/main_rr.cpp b/th02/main_rr.cpp
+new file mode 100644
+index 00000000..07a89617
+--- /dev/null
++++ b/th02/main_rr.cpp
+@@ -0,0 +1,23 @@
++/* ReC98
++ * -----
++ * The first random number ring of TH02's MAIN.EXE, a TU of its own between the
++ * stage loop and cfg_load()
++ */
++
++#pragma option -zCmain_01_TEXT -zPmain_01 -G
++
++#include "platform.h"
++#include "libs/master.lib/master.hpp"
++#include "th02/math/randring.hpp"
++
++void near randring_fill(void)
++{
++	int i = 0;
++	do {
++		randring[i] = irand();
++		i++;
++	} while(i < RANDRING_SIZE);
++}
++
++#define RANDRING_INSTANCE 1
++#include "th02/math/randring.cpp"

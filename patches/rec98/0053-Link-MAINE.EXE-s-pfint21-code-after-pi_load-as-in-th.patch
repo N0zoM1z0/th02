@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 23:27:35 +0100
+Subject: [PATCH] Link MAINE.EXE's pfint21 code after pi_load, as in the
+ original
+
+MAINE.EXE's program image and relocation table now match the original.
+Its header was rewritten by a non-TLINK tool: the relocation table starts
+at 0x1C and the header is only paragraph-aligned.
+---
+ Tupfile.lua    | 1 +
+ th02_maine.asm | 8 ++++----
+ 2 files changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index 88da7ba0..40db166a 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -582,6 +582,7 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='E'" }):link("maine", {
+ 	"th02/keydelay.cpp",
+ 	"th01/vplanset.cpp",
+ 	"th02/pi_load.cpp",
++	"th02/main/pf.asm",
+ 	"th02/frmdely1.cpp",
+ 	"th02/maine022.cpp",
+ 	"th02/input_rs.cpp",
+diff --git a/th02_maine.asm b/th02_maine.asm
+index 9c9dfe18..e280f864 100644
+--- a/th02_maine.asm
++++ b/th02_maine.asm
+@@ -106,10 +106,10 @@ include libs/master.lib/mem_unassign.asm
+ include libs/master.lib/super_entry_pat.asm
+ include libs/master.lib/super_entry_at.asm
+ include libs/master.lib/super_entry_bfnt.asm
+-include libs/master.lib/pfint21.asm
+-		db 0
+-include th02/formats/pfopen.asm
+-include libs/master.lib/pf_str_ieq.asm
++
++	public parfilename, pfint21_pf, pfint21_handle, pferrno, pfkey, pf_limit
++	public mem_AllocID
++	extrn PFOPEN:far, PFSTART:far, PFEND:far
+ _TEXT		ends
+ 
+ ; ===========================================================================

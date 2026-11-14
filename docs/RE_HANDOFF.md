@@ -2,17 +2,17 @@
 
 ## State
 
-- OP.EXE, MAIN.EXE and MAINE.EXE program images are byte-identical to the
-  originals, with equal relocation sets. ZUN.COM is byte-identical as a file.
-  MAIN's EXE header now matches too; only the relocation table *order*
-  differs (see "Relocation order" below).
+- OP.EXE and MAIN.EXE are identical to the originals as whole files (header
+  and relocation table included). ZUN.COM is identical as a file. MAINE.EXE
+  has an identical program image and relocation table; only its header
+  format differs (see "Linking" below). Verified by cold run
+  `session5-cold2`.
 - Work lives on branch `th02-recon` of the ReC98 worktree
   `.analysis/work/rec98` and is exported as `patches/rec98/*.patch`
   (`git format-patch b6ba5b0a52..th02-recon`). `scripts/build_th02.py`
   applies the series to a cold `git archive` and rebuilds everything.
 
-All ZUN C code in MAIN is now C++ (byte-exact, quick loop; last cold run
-`session4-cold1` predates the latest patches). What remains assembly:
+All ZUN C code in MAIN is C++. What remains assembly:
 - `pointnum_put()` (`th02/main/pointnum/num_put_m.asm`) and `pfopen()`
   (`th02/main/pf.asm`): hand-written by ZUN, like their TH04/TH05 siblings.
 - `sub_3F8A()` (`th02/main/dots_upd.asm`): its call to `vector2()` in SHARED
@@ -20,12 +20,9 @@ All ZUN C code in MAIN is now C++ (byte-exact, quick loop; last cold run
   within one physical segment. A natural far call gives an extra relocation.
 - `shots_hittest()` (`th02/main/hittest.asm`): the C++ version differs only
   in the final reload of `damage`.
-- master.lib code and all data stay in `th02_main.asm`.
-
-Recent structure changes: main_01 and main_03 are each one code segment
-(`-zCmain_01_TEXT`, `-zCmain_03_TEXT`), so all intra-group calls are natural.
-The original has no unshortened far call inside either group, which makes
-the merge safe. `Tupfile.lua`'s MAIN list now follows `obj/th02/main.@l`.
+- master.lib code, and the data of TUs that still declare it `extern`, stay
+  in `th02_main.asm` / `th02/main_dtl.asm`. `main_01a.cpp` and
+  `regist_m.cpp` define their own data; string literals are still extern.
 
 ## Loop
 
@@ -138,32 +135,39 @@ disassembly; `th02_asmedit.py` removes/exports procedures and data labels.
   duplicated code first. A jump into the middle of another branch needs `goto`
   (`mima_183D0`).
 
-## Relocation order
+## Linking
 
-TLINK writes relocations module by module in link order; within a TCC object,
-each LEDATA chunk's fixups come out highest address first. The target's
-table therefore shows ZUN's original object order and TU boundaries when
-each target relocation is mapped to its module in `obj/th02/main.map`:
-- After `c0`, the first object is one TU spanning `main_01a.cpp` and most of
-  `main_01b.cpp`, followed by its own `_DATA` (the far pointers at
-  `DGROUP:00FE`-`0110`, pause/quit strings).
-- Then `_TEXT` code from `GRAPH_PI_FREE` to `VSYNC_START`, the SHARED objects
-  `keydelay` … `vector`, `pfint21`/`PFEND`, then `exit` … `pi_put`.
-- The next TU starts at the end of `main_01b.cpp` and continues with
-  `main_01c.cpp`; `hud_ovrl.cpp`'s MAIN_03 code sits *inside* it, so ZUN's
-  TUs switched code segments.
-- Further interleavings: `explode`/`bullet` (MAIN_03) between `shot` and
-  `item`; `bombanim` and `player_b` are one TU; `main_04` before `player`;
-  `stage3`, `hittest`, `main_05`, `pillar`, `dialog`, `rika`, `meira`,
-  `regist_m`, one `_DATA` relocation, `sigma`, `enemy`, then `mima` and
-  `boss_5` as one TU, then `marisa`, then the C runtime.
-Reproducing this needs `th02_main.asm`'s relocation-bearing code and data
-moved into modules at those link positions, while keeping each segment's
-contributor order.
+The whole-file match depends on reproducing ZUN's object order and TU
+boundaries, which the target's relocation table records:
+- TLINK writes relocations module by module in link order. Within a TCC
+  object, each 0x400-byte LEDATA chunk's fixups come out highest address
+  first; TASM objects list them in ascending order. Mapping every target
+  relocation to its module in the `.map` file therefore shows where original
+  TUs began. Chunk breaks closer than 0x400 bytes are TU boundaries.
+- DGROUP data follows the same order, so a TU's data must be defined in that
+  TU when its relocations or position require it (`main_01a.cpp`,
+  `regist_m.cpp`). TCC moves `const` objects (and `const` one-dimensional
+  character arrays into the literal pool) behind the non-const ones; ZUN's
+  data was not `const`.
+- `th02/main_seg.asm` only declares MAIN's segments and goes first, so that
+  `main()`'s TU (with its data at `DGROUP:0090`) can precede
+  `th02_main.asm` while code segment #1 stays word-aligned.
+- TLINK sizes the header from the far fixups it sees before shortening them.
+  In the original, master.lib's calls into other library objects were such
+  far calls, so `nopcall` emits a real far call for TH02 (under `NOSMART`,
+  which keeps TASM from shortening it). This fixed OP's header size.
+- MAINE.EXE's original header starts the relocation table at `0x1C` and is
+  only paragraph-aligned, without TLINK's `0x3E` layout: it was rewritten by
+  another tool after linking. Everything after the header matches.
+- Original TUs found this way: `main_01a.cpp` plus the stage loop up to
+  `DemoPlay()`; the random number ring; `cfg_load()`; the game over menu;
+  `GameExecl()` with `sub_C5B0()`; `player_invalidate()`; bombanim with the
+  bomb renderers; Mima with `skill_calculate()` and her intro/defeat code.
 
 ## Next useful actions
 
-1. Relocation order: reorder `main.@l` and split `th02_main.asm` as above,
-   checking the order with the relocation-to-module mapping.
-2. `shots_hittest()`'s final reload.
-3. Cold rebuild (`build_th02.py --write-ledger`) and progress regeneration.
+1. `shots_hittest()`'s final reload; `sub_3F8A()` if a TLINK setup that
+   shortens across segments turns up.
+2. Move the remaining TU data and string literals out of `th02_main.asm`
+   into their TUs, using the data order as the guide.
+3. Identify the tool that rewrote MAINE.EXE's header.
