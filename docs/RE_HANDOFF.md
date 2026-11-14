@@ -3,7 +3,7 @@
 ## State
 
 - OP.EXE, MAIN.EXE, MAINE.EXE and ZUN.COM are identical to the originals as
-  whole files, from a cold build of the patch series (`session5-cold8`).
+  whole files, from a cold build of the patch series (`session5-cold9`).
 - Work lives on branch `th02-recon` of the ReC98 worktree
   `.analysis/work/rec98` and is exported as `patches/rec98/*.patch`
   (`git format-patch b6ba5b0a52..th02-recon`). `scripts/build_th02.py`
@@ -22,12 +22,13 @@ All ZUN C code in MAIN is C++. What remains assembly:
   i.e. word-aligned modules, which TCC never emits.
 - master.lib code and data stay in assembly. ZUN data is defined in its C++
   TUs (string literals included) for `main_01a.cpp`, `main_05.cpp`, the
-  player, the bombs, the sparks (sprites via bmp2arr's C++ output; the spark
-  TU is linked after the bombs, where its data sits), stage 3, dialog, Rika,
-  Meira, `regist_m.cpp`, Sigma, the enemies, Mima and Marisa. The rest is
-  still in `th02_main.asm`, ending with the HUD TU's data (score variables
-  up to `POWER_TO_SHOT_LEVEL`, which sits in the HUD's literal pool) and
-  `total_bombs_used` (the bomb TU's first variable).
+  HUD, items, player, bombs, sparks (sprites via bmp2arr's C++ output; the
+  spark TU is linked after the bombs, where its data sits), stage 3, dialog,
+  Rika, Meira, `regist_m.cpp`, Sigma, the enemies, Mima and Marisa. The rest
+  is still in `th02_main.asm`, ending with the block from `scroll_interval`
+  to `power_overflow`. By position it belongs to the shot, explode and
+  bullet TUs (linked between pointnum and items); the split between them is
+  not yet clear.
 
 ## Loop
 
@@ -182,5 +183,5 @@ boundaries, which the target's relocation table records:
 
 ## Next useful actions
 
-1. Continue moving data out of `th02_main.asm` from its end: the HUD TU
-   (`hud.cpp` with its `score.cpp`/`loadfree.cpp` includes) is next.
+1. Continue moving data out of `th02_main.asm` from its end: the shot /
+   explode / bullet block is next.

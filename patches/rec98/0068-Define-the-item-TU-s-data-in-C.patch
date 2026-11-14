@@ -1,0 +1,130 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:11:09 +0100
+Subject: [PATCH] Define the item TU's data in C++
+
+The power overflow bonus table has 43 entries (0 to POWER_OVERFLOW_MAX)
+and is the only word-aligned item in the TU's data. drop_cycle was a
+function-local static.
+---
+ th02/main/item/item.cpp   | 39 +++++++++++++++++++++++++++++----------
+ th02/main/item/shared.hpp |  2 +-
+ th02_main.asm             | 31 -------------------------------
+ 3 files changed, 30 insertions(+), 42 deletions(-)
+
+diff --git a/th02/main/item/item.cpp b/th02/main/item/item.cpp
+index f9d2fd1e..c7213f09 100644
+--- a/th02/main/item/item.cpp
++++ b/th02/main/item/item.cpp
+@@ -29,8 +29,31 @@ static const pixel_t ITEM_H = 16;
+ 
+ #define SEMIRANDOM_RING	ITEM_SEMIRANDOM_RING
+ 
+-extern const item_type_t SEMIRANDOM_RING[10];
+-extern const main_patnum_t ITEM_PATNUM[IT_COUNT];
++unsigned int item_bigpower_override = 0;
++item_type_t SEMIRANDOM_RING[10] = {
++	IT_POWER, IT_POINT, IT_POWER, IT_POINT, IT_POINT,
++	IT_POWER, IT_POWER, IT_POINT, IT_POINT, IT_POWER,
++};
++main_patnum_t ITEM_PATNUM[IT_COUNT] = {
++	PAT_ITEM_POWER,
++	PAT_ITEM_POINT,
++	PAT_ITEM_BOMB,
++	PAT_ITEM_BIGPOWER,
++	PAT_ITEM_1UP,
++};
++
++#pragma option -a2
++int16_t POWER_OVERFLOW_BONUS[POWER_OVERFLOW_MAX + 1] = {
++	   1,
++	   1,    2,    3,    4,    5,    6,    7,    8,    9,   10,
++	  20,   30,   40,   50,   60,   70,   80,   90,  100,  150,
++	 200,  250,  300,  350,  400,  450,  500,  550,  600,  650,
++	 700,  750,  800,  850,  900,  950, 1000, 1050, 1100, 1200,
++	1250, 1280,
++};
++#pragma option -a-
++
++int item_skill = 0;
+ 
+ static const uint8_t SEMIRANDOM_RING_SIZE = (
+ 	sizeof(SEMIRANDOM_RING) / sizeof(SEMIRANDOM_RING[0])
+@@ -166,13 +189,9 @@ void pascal near items_miss_add(screen_x_t left, screen_y_t top)
+ 		int v;
+ 	} type;
+ 
+-	extern const hack<Subpixel8> ITEM_MISS_VELOCITY_Y_SIDES;
+-	extern const hack<pixel_delta_8_t> ITEM_MISS_VELOCITY_X_CENTER;
+-	extern const hack<Subpixel8> ITEM_MISS_VELOCITY_Y_CENTER;
+-
+-	const hack<Subpixel8> VELOCITY_Y_SIDES = ITEM_MISS_VELOCITY_Y_SIDES;
+-	const hack<pixel_delta_8_t> VELOCITY_X_CENTER = ITEM_MISS_VELOCITY_X_CENTER;
+-	const hack<Subpixel8> VELOCITY_Y_CENTER = ITEM_MISS_VELOCITY_Y_CENTER;
++	const hack<Subpixel8> VELOCITY_Y_SIDES = { -0x50, -0x44, -0x38, -0x2C, -0x20 };
++	const hack<pixel_delta_8_t> VELOCITY_X_CENTER = { -2, -1, 0, 1, 2 };
++	const hack<Subpixel8> VELOCITY_Y_CENTER = { -0x38, -0x44, -0x50, -0x44, -0x38 };
+ 
+ 	// ZUN quirk: Probably meant to be ((PLAYFIELD_W / 3) * 1) and
+ 	// ((PLAYFIELD_W / 3) * 2), but [player_topleft] is relative to the
+@@ -376,7 +395,7 @@ bool16 pascal near item_hittest_y(item_t near& item)
+ void near items_update_and_render(void)
+ {
+ 	extern int frame_unused; // ZUN bloat
+-	extern uint8_t drop_cycle;
++	static uint8_t drop_cycle = 0;
+ 
+ 	item_t near* p = items;
+ 	frame_unused++;
+diff --git a/th02/main/item/shared.hpp b/th02/main/item/shared.hpp
+index 3c6c01d0..044683e0 100644
+--- a/th02/main/item/shared.hpp
++++ b/th02/main/item/shared.hpp
+@@ -10,4 +10,4 @@ static const int POWER_OVERFLOW_MAX = 42;
+ 
+ // Amount of score points to grant for collecting more power items while at
+ // full power.
+-extern int16_t POWER_OVERFLOW_BONUS[POWER_OVERFLOW_MAX];
++extern int16_t POWER_OVERFLOW_BONUS[POWER_OVERFLOW_MAX + 1];
+diff --git a/th02_main.asm b/th02_main.asm
+index 62e259b6..2d8ffbbf 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -667,37 +667,6 @@ public _player_option_patnum, _power_overflow
+ _player_option_patnum	db PAT_OPTION_A
+ _power_overflow	dw 0
+ 
+-public _item_bigpower_override, _ITEM_SEMIRANDOM_RING, _ITEM_PATNUM
+-public _ITEM_MISS_VELOCITY_Y_SIDES, _ITEM_MISS_VELOCITY_X_CENTER
+-public _ITEM_MISS_VELOCITY_Y_CENTER, _item_skill, _item_drop_cycle
+-_item_bigpower_override	dw 0
+-_ITEM_SEMIRANDOM_RING label byte
+-	db IT_POWER
+-	db IT_POINT
+-	db IT_POWER
+-	db IT_POINT
+-	db IT_POINT
+-	db IT_POWER
+-	db IT_POWER
+-	db IT_POINT
+-	db IT_POINT
+-	db IT_POWER
+-_ITEM_PATNUM label byte
+-	db PAT_ITEM_POWER
+-	db PAT_ITEM_POINT
+-	db PAT_ITEM_BOMB
+-	db PAT_ITEM_BIGPOWER
+-	db PAT_ITEM_1UP
+-	evendata
+-include th02/main/power_overflow[data].asm
+-_item_skill	dw 0
+-
+-public _ITEM_MISS_VELOCITY_Y_CENTER
+-_ITEM_MISS_VELOCITY_Y_SIDES 	db 0B0h, 0BCh, 0C8h, 0D4h, 0E0h
+-_ITEM_MISS_VELOCITY_X_CENTER	db -2, -1, 0, 1, 2
+-_ITEM_MISS_VELOCITY_Y_CENTER	db 0C8h, 0BCh, 0B0h, 0BCh, 0C8h
+-
+-_item_drop_cycle	db 0
+ 
+ 
+ 	.data?

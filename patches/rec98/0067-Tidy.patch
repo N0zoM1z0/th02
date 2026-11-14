@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:09:26 +0100
+Subject: [PATCH] Tidy
+
+---
+ th02/main/player/bombanim.cpp | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/th02/main/player/bombanim.cpp b/th02/main/player/bombanim.cpp
+index c9a3ff03..2dc33554 100644
+--- a/th02/main/player/bombanim.cpp
++++ b/th02/main/player/bombanim.cpp
+@@ -49,8 +49,6 @@ extern tile_mode_t bomb_c_tile_mode;
+ extern tile_mode_t bomb_b_tile_mode;
+ extern uint8_t bomb_b_row;
+ 
+-
+-
+ uint8_t total_bombs_used = 0;
+ 
+ void pascal near bomb_circle_point_put(screen_x_t left, screen_y_t top);
