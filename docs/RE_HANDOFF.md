@@ -3,7 +3,7 @@
 ## State
 
 - OP.EXE, MAIN.EXE, MAINE.EXE and ZUN.COM are identical to the originals as
-  whole files, from a cold build of the patch series (`session5-cold11`).
+  whole files, from a cold build of the patch series (`session5-cold12`).
 - Work lives on branch `th02-recon` of the ReC98 worktree
   `.analysis/work/rec98` and is exported as `patches/rec98/*.patch`
   (`git format-patch b6ba5b0a52..th02-recon`). `scripts/build_th02.py`
@@ -25,10 +25,12 @@ All ZUN C code in MAIN is C++. What remains assembly:
   `th02_*.asm` is master.lib only. Shared TUs are compiled once for every
   binary, so shared data had to sit where it fits all of them
   (`keydelay.cpp`, `frmdely1`'s neighbours `maine022.cpp`/`main02_2.cpp`,
-  pfopen's data in `pf.asm`). Uninitialized variables are C++ from stage 3
-  to the end of MAIN's link (stage 3, main_05, pillars, dialog, Rika, Meira,
-  high scores, Sigma, enemies, Mima, Marisa); the earlier ones are still
-  `.data?` in `th02_main.asm`.
+  pfopen's data in `pf.asm`). Uninitialized variables are C++ from the items
+  to the end of MAIN's link; the earlier ones (bullets/sparks and before)
+  are still `.data?` in `th02_main.asm`. Unlabeled gaps were real data:
+  oversized arrays (the bomb TU's 50-element tables) or unused variables
+  (`map_unused`, `tile_ring_unused`); TCC aligns neither byte-sized enums
+  nor character arrays under `-a2`, but does align structs.
 
 ## Loop
 
@@ -184,7 +186,7 @@ boundaries, which the target's relocation table records:
 ## Next useful actions
 
 1. Uninitialized variables: continue from the end of `th02_main.asm`'s
-   `.data?` (the player TU's `shot_cooldown_*`, then the tile TU). TCC emits
+   `.data?` (the bullet TU's block, which also holds `sparks`). TCC emits
    them in definition order; pads inside a TU mean `-a2` around the
    definitions, and an odd-aligned first variable means the TU started
    earlier (`map_length` in main_05).

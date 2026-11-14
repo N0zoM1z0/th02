@@ -1,0 +1,123 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 00:34:21 +0100
+Subject: [PATCH] Define the bomb TU's uninitialized variables in C++
+
+---
+ th02/main/player/bombanim.cpp | 47 ++++++++++++++++++++++++-----------
+ th02_main.asm                 | 35 +-------------------------
+ 2 files changed, 33 insertions(+), 49 deletions(-)
+
+diff --git a/th02/main/player/bombanim.cpp b/th02/main/player/bombanim.cpp
+index 2dc33554..76fac7fc 100644
+--- a/th02/main/player/bombanim.cpp
++++ b/th02/main/player/bombanim.cpp
+@@ -30,24 +30,41 @@
+ #include "th02/main/player/player.hpp"
+ #include "th02/main/tile/tile.hpp"
+ 
+-extern int bomb_frame;
+ extern point_t bomb_circle_center;
+ extern int bomb_circle_frame;
+-extern bool16 bomb_circle_done;
+ extern bool16 (near pascal *near playchar_bomb_func)(void);
+-extern vram_y_t bomb_scroll_line_on_page[PAGE_COUNT];
+-extern screen_point_t bomb_c_columns[48];
+-extern uint8_t bomb_particle_age[32];
+-extern screen_point_t bomb_particles[32];
+-
+-extern uint8_t far *bombs_bft;
+-extern uint8_t far *bomb_b_bft;
+-extern tile_mode_t bomb_a_tile_mode;
+-extern RGB8 bomb_a_col0;
+-extern RGB8 bomb_a_col3;
+-extern tile_mode_t bomb_c_tile_mode;
+-extern tile_mode_t bomb_b_tile_mode;
+-extern uint8_t bomb_b_row;
++
++
++// Uninitialized data, in the original order
++// -----------------------------------------
++
++#pragma option -a2
++bool bombing;
++int bomb_frame;
++int bomb_unused; // ZUN bloat
++uint8_t far *bomb_b_bft;
++uint8_t far *bombs_bft;
++uint8_t stage_bombs_used;
++point_t bomb_circle_center;
++int bomb_circle_frame;
++bool16 bomb_circle_done;
++vram_y_t bomb_scroll_line_on_page[PAGE_COUNT];
++
++// ZUN bloat: Both arrays have room for 50 elements, but only 48 and 32 are
++// used.
++screen_point_t bomb_c_columns[50];
++uint8_t bomb_particle_age[50];
++
++bool16 (near pascal *near playchar_bomb_func)(void);
++screen_point_t bomb_particles[32];
++#pragma option -a-
++tile_mode_t bomb_a_tile_mode;
++RGB8 bomb_a_col0;
++RGB8 bomb_a_col3;
++tile_mode_t bomb_c_tile_mode;
++tile_mode_t bomb_b_tile_mode;
++uint8_t bomb_b_row;
++// -----------------------------------------
+ 
+ uint8_t total_bombs_used = 0;
+ 
+diff --git a/th02_main.asm b/th02_main.asm
+index c770a10f..094a9882 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -35,6 +35,7 @@ include th02/sprites/main_pat.inc
+ 	extern _memcpy:proc
+ 
+ playperf_min = -6
++BOMB_CIRCLE_FRAMES = 32
+ STONE_COUNT = 5
+ 
+ SP_STAGE = 0
+@@ -949,39 +950,5 @@ _score_delta      	dd ?
+ _score_delta_transferred_prev	dw ?
+ _shot_level	db ?
+ 		db ?
+-include th02/main/player/bomb[bss].asm
+-public _bomb_b_bft
+-_bomb_b_bft	dd ?
+-public _bombs_bft
+-_bombs_bft	dd ?
+-public _stage_bombs_used
+-_stage_bombs_used	db ?
+-	evendata
+-public _bomb_circle_center, _bomb_circle_frame, _bomb_circle_done
+-_bomb_circle_center	Point <?>
+-_bomb_circle_frame	dw ?
+-_bomb_circle_done	dw ?
+-public _bomb_scroll_line_on_page, _bomb_c_columns, _bomb_particle_age
+-_bomb_scroll_line_on_page	dw 2 dup(?)
+-_bomb_c_columns	Point 48 dup(<?>)
+-		db 8 dup(?)
+-_bomb_particle_age	db 32 dup(?)
+-		db 18 dup(?)
+-public _playchar_bomb_func
+-_playchar_bomb_func	dw ?
+-public _bomb_particles
+-_bomb_particles	Point 32 dup(<?>)
+-public _bomb_a_tile_mode
+-_bomb_a_tile_mode	db ?
+-public _bomb_a_col0
+-_bomb_a_col0	rgb_t <?>
+-public _bomb_a_col3
+-_bomb_a_col3	rgb_t <?>
+-public _bomb_c_tile_mode
+-_bomb_c_tile_mode	db ?
+-public _bomb_b_tile_mode
+-_bomb_b_tile_mode	db ?
+-public _bomb_b_row
+-_bomb_b_row	db ?
+ 
+ 		end
