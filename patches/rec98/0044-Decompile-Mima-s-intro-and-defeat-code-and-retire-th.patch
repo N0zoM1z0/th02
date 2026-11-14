@@ -1,0 +1,1000 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 22:44:09 +0100
+Subject: [PATCH] Decompile Mima's intro and defeat code and retire
+ th02/main_03_.asm
+
+Mima's functions are compiled without -G (POP CX after the KAJA fade), so
+they continue skill_calculate()'s TU. The Tupfile MAIN link order now
+matches the verified response file.
+---
+ Tupfile.lua                 |  15 +-
+ th02/boss_5.cpp             |   7 +
+ th02/main/boss/b5_.cpp      | 199 +++++++++++++
+ th02/main/boss/marisa.cpp   |  36 +--
+ th02/main/player/player.hpp |  18 ++
+ th02/main_03_.asm           | 542 ------------------------------------
+ th02/marisa.cpp             |   4 +-
+ th02_main.asm               |  26 +-
+ 8 files changed, 257 insertions(+), 590 deletions(-)
+ delete mode 100644 th02/main_03_.asm
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index a3ab7534..6b281f3d 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -517,8 +517,10 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/spark_i.asm",
+ 	"th02/tile.cpp",
+ 	"th02/pointnum.cpp",
++	"th02/main/player/shot.cpp",
+ 	"th02/item.cpp",
+ 	"th02/hud.cpp",
++	"th02/main/player/bombanim.cpp",
+ 	"th02/player_b.cpp",
+ 	"th02/player.cpp",
+ 	"th02/zunerror.cpp",
+@@ -527,12 +529,6 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/main_01a.cpp",
+ 	"th02/main_01b.cpp",
+ 	"th02/main_01c.cpp",
+-	"th02/main/player/shot.cpp",
+-	"th02/main/player/bombanim.cpp",
+-	"th02/main/boss/explode.cpp",
+-	"th02/stage3.cpp",
+-	"th02/main/hittest.asm",
+-	"th02/main/pillar.cpp",
+ 	"th01/vplanset.cpp",
+ 	"th02/pi_load.cpp",
+ 	"th02/vector.cpp",
+@@ -555,16 +551,19 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/main_04.cpp",
+ 	"th02/main_05.cpp",
+ 	"th02/hud_ovrl.cpp",
++	"th02/main/boss/explode.cpp",
+ 	"th02/bullet.cpp",
++	"th02/stage3.cpp",
++	"th02/main/hittest.asm",
++	"th02/main/pillar.cpp",
+ 	"th02/dialog.cpp",
+ 	"th02/main/boss/rika.cpp",
+ 	"th02/main/boss/meira.cpp",
+ 	"th02/main/boss/sigma.cpp",
+ 	"th02/main/enemy/enemy.cpp",
+ 	"th02/mima.cpp",
+-	"th02/main_03_.asm",
+-	"th02/marisa.cpp",
+ 	"th02/boss_5.cpp",
++	"th02/marisa.cpp",
+ 	"th02/regist_m.cpp",
+ })
+ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='E'" }):link("maine", {
+diff --git a/th02/boss_5.cpp b/th02/boss_5.cpp
+index 816622a7..3b27da34 100644
+--- a/th02/boss_5.cpp
++++ b/th02/boss_5.cpp
+@@ -1,2 +1,9 @@
++/* ReC98
++ * -----
++ * skill_calculate() and the Stage 5 boss (Mima) intro and defeat code of TH02
++ * MAIN.EXE. Compiled without -G: the KAJA fade call cleans its argument with
++ * POP CX rather than ADD SP, 2.
++ */
++
+ #pragma option -zCmain_03_TEXT
+ #include "th02/main/boss/b5_.cpp"
+diff --git a/th02/main/boss/b5_.cpp b/th02/main/boss/b5_.cpp
+index 86157328..f27792df 100644
+--- a/th02/main/boss/b5_.cpp
++++ b/th02/main/boss/b5_.cpp
+@@ -1,6 +1,20 @@
++#include "platform.h"
++#include "pc98.h"
++#include "libs/master.lib/master.hpp"
++#include "libs/master.lib/pc98_gfx.hpp"
+ #include "th02/resident.hpp"
+ #include "th02/core/globals.hpp"
+ #include "th02/main/playperf.hpp"
++#include "th02/hardware/pages.hpp"
++#include "th02/hardware/frmdelay.h"
++#include "th02/main/playfld.hpp"
++#include "th02/main/boss/boss.hpp"
++#include "th02/main/dialog/dialog.hpp"
++#include "th02/main/bullet/bullet.hpp"
++#include "th02/main/player/player.hpp"
++#include "th02/main/tile/tile.hpp"
++#include "th02/snd/snd.h"
++#include "th02/sprites/main_pat.h"
+ 
+ void near skill_calculate(void)
+ {
+@@ -21,3 +35,188 @@ void near skill_calculate(void)
+ 	skill += item_skill;
+ 	resident->skill = skill;
+ }
++
++// Mima's initialization and defeat
++// --------------------------------
++
++extern int16_t word_26C66;
++extern int16_t word_26C68;
++extern int16_t word_26C6A;
++extern int16_t word_26CBE;
++extern uint8_t byte_26CC0;
++extern uint8_t byte_26CC1;
++extern uint8_t byte_26CC2;
++extern uint8_t byte_26CC3;
++extern uint8_t byte_26CC4;
++extern uint8_t byte_26CC5;
++extern int16_t mima_sphere_active[8];
++extern char aMima_bft[];
++extern char aMima1_bft[];
++extern char aStage3_b_btt[];
++extern char aMima_m[];
++extern char aMaine_0[];
++extern int16_t patnum_2064E;
++extern uint8_t byte_2066A;
++extern bool byte_2066B;
++extern char aMima2_bft[];
++
++void near dialog_pre(void);
++void near dialog_post(void);
++void sub_13ABB(char far *fn);
++void shots_clear(void);
++void near sub_1A6C5(void);
++void near sub_1A46B(void);
++void near sub_1A529(void);
++void near mima_180AC(void);
++void scoredat_game_clear_save(void);
++int GameExecl(char *binary_fn);
++
++#define mima_put() { \
++	super_put_rect( \
++		boss_left_on_page[page_back], boss_top_on_page[page_back], patnum_2064E \
++	); \
++	super_put_rect( \
++		(boss_left_on_page[page_back] + 48), \
++		boss_top_on_page[page_back], \
++		(patnum_2064E + 1) \
++	); \
++	super_put_rect( \
++		(boss_left_on_page[page_back] + 96), \
++		boss_top_on_page[page_back], \
++		(patnum_2064E + 2) \
++	); \
++}
++
++void mima_init(void)
++{
++	register int i;
++
++	sub_1A6C5();
++	dialog_pre();
++	super_clean(128, 192);
++	super_entry_bfnt(aMima_bft);
++	dialog_script_stage5_pre_intro_animate();
++	vsync_Count1 = 0;
++	frame_delay(10);
++	sub_1A529();
++	super_clean(128, 192);
++	super_patnum = 128;
++	super_entry_bfnt(aMima1_bft);
++	super_entry_bfnt(aStage3_b_btt);
++	boss_left_on_page[0] = (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - 80);
++	boss_left_on_page[1] = boss_left_on_page[0];
++	boss_top_on_page[0] = (PLAYFIELD_TOP + 48);
++	boss_top_on_page[1] = boss_top_on_page[0];
++	patnum_2064E = 128;
++	dialog_script_stage5_pre_unsealed_animate();
++	palette_white_out(1);
++	grc_setclip(PLAYFIELD_LEFT, 0, PLAYFIELD_RIGHT, (RES_Y - 1));
++	grcg_setcolor(GC_RMW, 0);
++	grcg_fill();
++	grcg_off();
++	mima_put();
++	player_and_options_put();
++	snd_se_play(10);
++	snd_se_update();
++	sub_1A46B();
++	palette_white_in(3);
++	sub_13ABB(aMima_m);
++	dialog_script_stage5_pre_winged_animate();
++	dialog_post();
++	shots_clear();
++	boss_damage = 0;
++	byte_2066A = false;
++	boss_phase_frame = 0;
++	byte_2066B = false;
++	word_26C68 = 0;
++	word_26C66 = 0;
++	word_26CBE = 0;
++	tile_mode = TM_NONE;
++	byte_26CC1 = 0;
++	byte_26CC2 = 0;
++	byte_26CC3 = 13;
++	byte_26CC5 = 3;
++	byte_26CC4 = 12;
++	graph_accesspage(page_front);
++	graph_clear();
++	graph_accesspage(page_back);
++	graph_clear();
++	grcg_setcolor(GC_RMW, 11);
++	grc_setclip(PLAYFIELD_RIGHT, 0, (RES_X - 1), (RES_Y - 1));
++	graph_accesspage(page_front);
++	grcg_fill();
++	graph_accesspage(page_back);
++	grcg_fill();
++	grcg_off();
++	grc_setclip(PLAYFIELD_LEFT, 0, PLAYFIELD_RIGHT, (RES_Y - 1));
++	word_26C6A = 0;
++	for(i = 0; i < 8; i++) {
++		mima_sphere_active[i] = 0;
++	}
++	byte_26CC0 = 0;
++	mima_180AC();
++}
++
++void near mima_game_end(void)
++{
++	PaletteTone = 0;
++	palette_show();
++	resident->score_highest = (resident->score_highest < score)
++		? score
++		: resident->score_highest;
++	resident->score = ((score * 10) + resident->continues_used);
++	resident->stage = 0x7F;
++	resident->rem_lives = lives;
++	resident->rem_bombs = bombs;
++	skill_calculate();
++	GameExecl(aMaine_0);
++}
++
++int near mima_19C8D(void)
++{
++	shots_clear();
++	bullets_clear();
++	mima_put();
++	dialog_pre();
++	dialog_script_stage5_form1defeat_animate();
++	if(resident->continues_used != 0) {
++		snd_kaja_func(KAJA_SONG_FADE, 10);
++		palette_white_out(10);
++		frame_delay(50);
++		score += 50000;
++		mima_game_end();
++		return 1;
++	}
++	super_clean(128, 192);
++	super_patnum = 128;
++	super_entry_bfnt(aMima2_bft);
++	dialog_post();
++	graph_accesspage(page_front);
++	grcg_setcolor(GC_RMW, 0);
++	grcg_fill();
++	graph_accesspage(page_back);
++	grcg_fill();
++	grcg_off();
++	byte_26CC0 = 0;
++	return 0;
++}
++
++void mima_end(void)
++{
++	// ZUN bug: This renders Mima's sprite to [page_back] on top of the boss
++	// background rendered earlier, right before animating the defeat dialog
++	// on [page_front] and launching into MAINE.EXE, which means that none of
++	// this will ever show up. Given the fact that this code exists, it
++	// probably was ZUN's intention to render the defeat dialog on top of
++	// what's rendered here - i.e, before rendering any player shot, item,
++	// bullet, or spark sprites - rather than blindly printing the text on top
++	// of whatever white VRAM pixels that may have been in the text box area
++	// in the previous full frame.
++	mima_put();
++	dialog_script_stage5_post_animate();
++	score += 100000;
++	if(resident->continues_used == 0) {
++		scoredat_game_clear_save();
++	}
++	mima_game_end();
++}
+diff --git a/th02/main/boss/marisa.cpp b/th02/main/boss/marisa.cpp
+index 6670532d..f2c4177f 100644
+--- a/th02/main/boss/marisa.cpp
++++ b/th02/main/boss/marisa.cpp
+@@ -110,11 +110,20 @@ extern char aStage3_b_btt_0[];
+ extern char aBoss3_m[];
+ 
+ void sub_13ABB(char far *fn);
++void near dialog_post(void);
+ void near marisa_1B214(void);
+ void shots_clear(void);
+ 
+ extern vram_offset_t scroll_line_vo;
+ 
++#define marisa_and_player_put() { \
++	super_put_rect(marisa_topleft.x, marisa_topleft.y, patnum_2064E); \
++	super_put_rect( \
++		(marisa_topleft.x + 48), marisa_topleft.y, (patnum_2064E + 1) \
++	); \
++	player_and_options_put(); \
++}
++
+ // Background
+ // ----------
+ 
+@@ -431,29 +440,6 @@ void midboss4_update_and_render(void)
+ 	midboss4_render();
+ }
+ 
+-#define player_and_options_put() { \
+-	super_roll_put(player_topleft.x, player_topleft.y, PAT_PLAYCHAR_STILL); \
+-	super_roll_put_tiny( \
+-		player_option_left_topleft[page_back].x, \
+-		player_option_left_topleft[page_back].y, \
+-		PAT_OPTION_A \
+-	); \
+-	super_roll_put_tiny( \
+-		(player_option_left_topleft[page_back].x + \
+-		PLAYER_OPTION_TO_OPTION_DISTANCE), \
+-		player_option_left_topleft[page_back].y, \
+-		PAT_OPTION_A \
+-	); \
+-}
+-
+-#define marisa_and_player_put() { \
+-	super_put_rect(marisa_topleft.x, marisa_topleft.y, patnum_2064E); \
+-	super_put_rect( \
+-		(marisa_topleft.x + 48), marisa_topleft.y, (patnum_2064E + 1) \
+-	); \
+-	player_and_options_put(); \
+-}
+-
+ void pascal near sub_1A423(screen_x_t left, screen_y_t top)
+ {
+ 	register int col;
+@@ -671,7 +657,7 @@ void near marisa_1AA60(void)
+ 		(player_top_on_page[page_front] > (marisa_topleft.y - 16)) &&
+ 		(player_top_on_page[page_front] < (marisa_topleft.y + 48))
+ 	) {
+-		player_is_hit = true;
++		player_is_hit = PLAYER_HIT;
+ 	}
+ }
+ 
+@@ -711,7 +697,7 @@ void near marisa_1AB35(void)
+ 			(player_top_on_page[page_front] > (*marisa_bit_top_on_back_page[i] - 16)) &&
+ 			(player_top_on_page[page_front] < (*marisa_bit_top_on_back_page[i] + 16))
+ 		) {
+-			player_is_hit = true;
++			player_is_hit = PLAYER_HIT;
+ 		}
+ 	}
+ 	byte_1EB88 = 1;
+diff --git a/th02/main/player/player.hpp b/th02/main/player/player.hpp
+index e6ccc890..ebd87939 100644
+--- a/th02/main/player/player.hpp
++++ b/th02/main/player/player.hpp
+@@ -67,6 +67,24 @@ inline screen_x_t player_center_x(void) {
+ inline screen_x_t player_center_y(void) {
+ 	return (player_topleft.y + (PLAYER_H / 2));
+ }
++
++// Blits the still player sprite and both options at their [page_back]
++// positions, as done by the stage 4 and 5 boss intros.
++#define player_and_options_put() { \
++	super_roll_put(player_topleft.x, player_topleft.y, PAT_PLAYCHAR_STILL); \
++	super_roll_put_tiny( \
++		player_option_left_topleft[page_back].x, \
++		player_option_left_topleft[page_back].y, \
++		PAT_OPTION_A \
++	); \
++	super_roll_put_tiny( \
++		(player_option_left_topleft[page_back].x + \
++		PLAYER_OPTION_TO_OPTION_DISTANCE), \
++		player_option_left_topleft[page_back].y, \
++		PAT_OPTION_A \
++	); \
++}
++
+ // ----------------
+ 
+ extern main_patnum_t player_option_patnum;
+diff --git a/th02/main_03_.asm b/th02/main_03_.asm
+deleted file mode 100644
+index 0ee00f0c..00000000
+--- a/th02/main_03_.asm
++++ /dev/null
+@@ -1,542 +0,0 @@
+-; ReC98
+-; -----
+-; Assembly still left at the start of main_03_TEXT in TH02's MAIN.EXE, kept
+-; as its own module so that the C++ objects around it can share segments.
+-
+-	.386
+-	.model use16 large _TEXT
+-	locals
+-
+-
+-include ReC98.inc
+-include th01/math/subpixel.inc
+-include th02/th02.inc
+-include th02/main/entity.inc
+-include th02/main/playfld.inc
+-include th02/main/sparks.inc
+-include th02/main/hud/hud.inc
+-include th02/main/tile/tile.inc
+-include th02/main/player/player.inc
+-include th02/sprites/main_pat.inc
+-
+-DS_PREBOSS = 0
+-DS_POSTBOSS = 1
+-BG_1 = 20h
+-BG_4_SPREAD_WIDE = 0Fh
+-BG_5_SPREAD_MEDIUM = 14h
+-IT_1UP = 4
+-IT_BOMB = 2
+-PAT_BULLET16_OUTLINED_BALL_BEIGE = 80
+-TM_NONE = 2
+-
+-	extrn aMima1_bft:byte
+-	extrn aMima_bft:byte
+-	extrn aMima_m:byte
+-	extrn aStage3_b_btt:byte
+-	extrn PaletteTone:word
+-	extrn super_patnum:word
+-	extrn vsync_Count1:word
+-	extrn _boss_damage:word
+-	extrn _boss_left_on_page:word
+-	extrn _boss_phase_frame:word
+-	extrn _boss_top_on_page:word
+-	extrn _byte_2066A:byte
+-	extrn _byte_2066B:byte
+-	extrn _byte_26CC0:byte
+-	extrn _byte_26CC1:byte
+-	extrn _byte_26CC2:byte
+-	extrn _byte_26CC3:byte
+-	extrn _byte_26CC4:byte
+-	extrn _byte_26CC5:byte
+-	extrn _mima_sphere_active:word
+-	extrn _page_back:byte
+-	extrn _page_front:byte
+-	extrn _patnum_2064E:word
+-	extrn _player_option_left_topleft:Point
+-	extrn _player_topleft:Point
+-	extrn _resident:dword
+-	extrn _score:dword
+-	extrn _tile_mode:byte
+-	extrn _word_26C66:word
+-	extrn _word_26C68:word
+-	extrn _word_26C6A:word
+-	extrn _word_26CBE:word
+-	extrn aMaine_0:byte
+-	extrn aMima2_bft:byte
+-	extrn _midboss4_patterns_done:byte
+-	extrn _midboss4_bullet_top:word
+-	extrn _midboss4_kill_frame:word
+-	extrn _word_26CFE:word
+-	extrn _word_26D54:word
+-	extrn _midboss4_active:word
+-	extrn _bombs:byte
+-	extrn _boss_left_on_back_page:word
+-	extrn _boss_top_on_back_page:word
+-	extrn _lives:byte
+-	extrn _marisa_phase:word
+-	extrn _marisa_topleft:Point
+-	extrn _midboss_tile_row:word
+-	extrn _pillar_frames_new:byte
+-	extrn _rank:byte
+-	extrn _score_delta:dword
+-	extrn _scroll_line:word
+-	extrn _shot_target_left:word
+-	extrn _shot_target_top:word
+-	extrn _aBoss3_m:byte
+-	extrn _aMima_bft_0:byte
+-	extrn _aStage3_b_bft:byte
+-	extrn _aStage3_b_btt_0:byte
+-	extrn _midboss4_pattern:byte
+-	extrn _word_1FFF0:word
+-	extrn _word_1FFF2:word
+-	extrn _word_1FFF6:word
+-	extrn _angle_1E510:byte
+-	extrn _byte_1EE96:byte
+-	extrn _byte_1FFF8:byte
+-	extrn _byte_26D7E:byte
+-	extrn _marisa_bg_col_p:byte
+-	extrn _marisa_bit_hits:word
+-	extrn _marisa_bit_hit_this_frame:word
+-	extrn _marisa_bit_patterns_seen:byte
+-	extrn _marisa_bit_state:word
+-	extrn _marisa_bit_state_sum:word
+-	extrn _marisa_pattern:byte
+-	extrn _marisa_pattern_cycle:byte
+-	extrn _player_invincibility_time:byte
+-	extrn _player_is_hit:byte
+-	extrn _player_left_on_page:word
+-	extrn _player_top_on_page:word
+-	extrn _scroll_line_vo:word
+-	extrn @dialog_post$qv:near
+-	extrn @dialog_pre$qv:near
+-	extrn @dialog_script_stage5_pre_intro_a$qv:near
+-	extrn @dialog_script_stage5_pre_unseale$qv:near
+-	extrn @dialog_script_stage5_pre_winged_$qv:near
+-	extrn @FRAME_DELAY$QI:proc
+-	extrn @mima_180AC$qv:near
+-	extrn @shots_clear$qv:proc
+-	extrn GRAPH_CLEAR:far
+-	extrn GRCG_FILL:far
+-	extrn GRCG_OFF:far
+-	extrn GRCG_SETCOLOR:far
+-	extrn GRC_SETCLIP:far
+-	extrn PALETTE_SHOW:far
+-	extrn PALETTE_WHITE_IN:far
+-	extrn PALETTE_WHITE_OUT:far
+-	extrn SUPER_CLEAN:far
+-	extrn SUPER_ENTRY_BFNT:far
+-	extrn SUPER_PUT_RECT:far
+-	extrn SUPER_ROLL_PUT:far
+-	extrn SUPER_ROLL_PUT_TINY:far
+-	extrn _snd_se_play:proc
+-	extrn _snd_se_update:proc
+-	extrn @BULLETS_ADD_16X16$QIIUC32BULLET_GROUP_OR_SPECIAL_MOTION_TII:near
+-	extrn @BULLETS_ADD_PELLET$QIIUCUCI:near
+-	extrn @dialog_script_stage5_form1defeat$qv:near
+-	extrn @dialog_script_stage5_post_animat$qv:near
+-	extrn @GameExecl$qnc:proc
+-	extrn @ITEMS_ADD$QIII:proc
+-	extrn @PILLAR_ADD$QIIII:near
+-	extrn @RANDRING2_NEXT8_AND$QUC:near
+-	extrn @scoredat_game_clear_save$qv:proc
+-	extrn @SHOTS_HITTEST$QIIII:near
+-	extrn @skill_calculate$qv:near
+-	extrn @SPARKS_ADD$QIUIIII:proc
+-	extrn @tiles_egc_render$qv:proc
+-	extrn @TILES_INVALIDATE_RECT$QIIII:proc
+-	extrn @TILE_EGC_ROLL_COPY_8$QIII:proc
+-	extrn EGC_OFF:far
+-	extrn EGC_ON:far
+-	extrn SUPER_ROLL_PUT_1PLANE:far
+-	extrn SUPER_ZOOM:far
+-	extrn _snd_kaja_interrupt:proc
+-	extrn @DIALOG_SCRIPT_GENERIC_PART_ANIMA$Q17DIALOG_SEQUENCE_T:near
+-	extrn @dialog_script_stage4_pre_intro_a$qv:near
+-	extrn @dialog_script_stage4_pre_marisa_$qv:near
+-	extrn @marisa_1B214$qv:near
+-	extrn @randring2_next8$qv:near
+-	extrn GRAPH_COPY_PAGE:far
+-	extrn GRAPH_SCROLLUP:far
+-	extrn GRCG_CIRCLE:far
+-	extrn GRCG_CIRCLEFILL:far
+-	extrn SUPER_PUT:far
+-
+-main_03 group main_03_TEXT
+-main_03_TEXT	segment	byte public 'CODE' use16
+-	assume cs:main_03
+-	extrn @sub_13ABB$qnc:proc
+-	extrn @bullets_clear$qv:proc
+-	extrn @sub_1A6C5$qv:near
+-	extrn @sub_1A529$qv:near
+-	extrn @sub_1A46B$qv:near
+-
+-public @mima_init$qv
+-@mima_init$qv	proc far
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		call	@sub_1A6C5$qv
+-		call	@dialog_pre$qv
+-		call	super_clean pascal, (128 shl 16) or 192
+-		call	super_entry_bfnt pascal, ds, offset aMima_bft ; "mima.bft"
+-		call	@dialog_script_stage5_pre_intro_a$qv
+-		mov	vsync_Count1, 0
+-		call	@frame_delay$qi pascal, 10
+-		call	@sub_1A529$qv
+-		call	super_clean pascal, (128 shl 16) or 192
+-		mov	super_patnum, 80h
+-		call	super_entry_bfnt pascal, ds, offset aMima1_bft ; "mima1.bft"
+-		call	super_entry_bfnt pascal, ds, offset aStage3_b_btt ; "stage3_b.btt"
+-		mov	_boss_left_on_page[0 * word], (PLAYFIELD_LEFT + (PLAYFIELD_W / 2) - 80)
+-		mov	ax, _boss_left_on_page[0 * word]
+-		mov	_boss_left_on_page[1 * word], ax
+-		mov	_boss_top_on_page[0 * word], (PLAYFIELD_TOP + 48)
+-		mov	ax, _boss_top_on_page[0 * word]
+-		mov	_boss_top_on_page[1 * word], ax
+-		mov	_patnum_2064E, 128
+-		call	@dialog_script_stage5_pre_unseale$qv
+-		push	1
+-		call	palette_white_out
+-		call	grc_setclip pascal, (PLAYFIELD_LEFT shl 16) or 0, (PLAYFIELD_RIGHT shl 16) or (RES_Y - 1)
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + 0
+-		call	grcg_fill
+-		call	grcg_off
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		push	_boss_left_on_page[bx]
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		push	_boss_top_on_page[bx]
+-		push	_patnum_2064E
+-		call	super_put_rect
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _boss_left_on_page[bx]
+-		add	ax, 48
+-		push	ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		push	_boss_top_on_page[bx]
+-		mov	ax, _patnum_2064E
+-		inc	ax
+-		push	ax
+-		call	super_put_rect
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _boss_left_on_page[bx]
+-		add	ax, 96
+-		push	ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		push	_boss_top_on_page[bx]
+-		mov	ax, _patnum_2064E
+-		add	ax, 2
+-		push	ax
+-		call	super_put_rect
+-		call	super_roll_put pascal, _player_topleft.x, _player_topleft.y, PAT_PLAYCHAR_STILL
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		push	_player_option_left_topleft[bx].x
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		push	_player_option_left_topleft[bx].y
+-		push	PAT_OPTION_A
+-		call	super_roll_put_tiny
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		mov	ax, _player_option_left_topleft[bx].x
+-		add	ax, PLAYER_OPTION_TO_OPTION_DISTANCE
+-		push	ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		push	_player_option_left_topleft[bx].y
+-		push	PAT_OPTION_A
+-		call	super_roll_put_tiny
+-		call	_snd_se_play stdcall, 10
+-		call	_snd_se_update
+-		call	@sub_1A46B$qv
+-		push	3
+-		call	palette_white_in
+-		push	ds
+-		push	offset aMima_m	; "mima.m"
+-		nopcall	@sub_13ABB$qnc
+-		add	sp, 6
+-		call	@dialog_script_stage5_pre_winged_$qv
+-		call	@dialog_post$qv
+-		call	@shots_clear$qv
+-		mov	_boss_damage, 0
+-		mov	_byte_2066A, 0
+-		mov	_boss_phase_frame, 0
+-		mov	_byte_2066B, 0
+-		mov	_word_26C68, 0
+-		mov	_word_26C66, 0
+-		mov	_word_26CBE, 0
+-		mov	_tile_mode, TM_NONE
+-		mov	_byte_26CC1, 0
+-		mov	_byte_26CC2, 0
+-		mov	_byte_26CC3, 0Dh
+-		mov	_byte_26CC5, 3
+-		mov	_byte_26CC4, 0Ch
+-		graph_accesspage _page_front
+-		call	graph_clear
+-		graph_accesspage _page_back
+-		call	graph_clear
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + 11
+-		call	grc_setclip pascal, (PLAYFIELD_RIGHT shl 16) or 0, ((RES_X - 1) shl 16) or (RES_Y - 1)
+-		graph_accesspage _page_front
+-		call	grcg_fill
+-		graph_accesspage _page_back
+-		call	grcg_fill
+-		call	grcg_off
+-		call	grc_setclip pascal, (PLAYFIELD_LEFT shl 16) or 0, (PLAYFIELD_RIGHT shl 16) or (RES_Y - 1)
+-		mov	_word_26C6A, 0
+-		xor	si, si
+-		jmp	short loc_19C0D
+-; ---------------------------------------------------------------------------
+-
+-loc_19C02:
+-		mov	bx, si
+-		add	bx, bx
+-		mov	word ptr _mima_sphere_active[bx], 0
+-		inc	si
+-
+-loc_19C0D:
+-		cmp	si, 8
+-		jl	short loc_19C02
+-		mov	_byte_26CC0, 0
+-		call	@mima_180AC$qv
+-		pop	si
+-		pop	bp
+-		retf
+-@mima_init$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-mima_19C1D	proc near
+-		push	bp
+-		mov	bp, sp
+-		mov	PaletteTone, 0
+-		call	far ptr	palette_show
+-		les	bx, _resident
+-		mov	eax, es:[bx+mikoconfig_t.score_highest]
+-		cmp	eax, _score
+-		jnb	short loc_19C41
+-		mov	eax, _score
+-		jmp	short loc_19C4A
+-; ---------------------------------------------------------------------------
+-
+-loc_19C41:
+-		les	bx, _resident
+-		mov	eax, es:[bx+mikoconfig_t.score_highest]
+-
+-loc_19C4A:
+-		les	bx, _resident
+-		mov	es:[bx+mikoconfig_t.score_highest], eax
+-		mov	eax, _score
+-		imul	eax, 10
+-		movzx	edx, es:[bx+mikoconfig_t.continues_used]
+-		add	eax, edx
+-		mov	es:[bx+mikoconfig_t.score], eax
+-		mov	es:[bx+mikoconfig_t.stage], 7Fh
+-		mov	al, _lives
+-		mov	es:[bx+mikoconfig_t.rem_lives], al
+-		mov	al, _bombs
+-		mov	es:[bx+mikoconfig_t.rem_bombs], al
+-		call	@skill_calculate$qv
+-		call	@GameExecl$qnc c, offset aMaine_0, ds	; "maine"
+-		pop	bp
+-		retn
+-mima_19C1D	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @mima_19C8D$qv
+-@mima_19C8D$qv	proc near
+-		push	bp
+-		mov	bp, sp
+-		call	@shots_clear$qv
+-		nopcall	@bullets_clear$qv
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		push	_boss_left_on_page[bx]
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		push	_boss_top_on_page[bx]
+-		push	_patnum_2064E
+-		call	super_put_rect
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _boss_left_on_page[bx]
+-		add	ax, 48
+-		push	ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		push	_boss_top_on_page[bx]
+-		mov	ax, _patnum_2064E
+-		inc	ax
+-		push	ax
+-		call	super_put_rect
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _boss_left_on_page[bx]
+-		add	ax, 96
+-		push	ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		push	_boss_top_on_page[bx]
+-		mov	ax, _patnum_2064E
+-		add	ax, 2
+-		push	ax
+-		call	super_put_rect
+-		call	@dialog_pre$qv
+-		call	@dialog_script_stage5_form1defeat$qv
+-		les	bx, _resident
+-		cmp	es:[bx+mikoconfig_t.continues_used], 0
+-		jz	short loc_19D48
+-		kajacall	KAJA_SONG_FADE, 10
+-		pop	cx
+-		push	0Ah
+-		call	palette_white_out
+-		call	@frame_delay$qi pascal, 50
+-		add	_score, 50000
+-		call	mima_19C1D
+-		mov	ax, 1
+-		pop	bp
+-		retn
+-; ---------------------------------------------------------------------------
+-
+-loc_19D48:
+-		call	super_clean pascal, (128 shl 16) or 192
+-		mov	super_patnum, 80h
+-		call	super_entry_bfnt pascal, ds, offset aMima2_bft ; "mima2.bft"
+-		call	@dialog_post$qv
+-		graph_accesspage _page_front
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + 0
+-		call	grcg_fill
+-		graph_accesspage _page_back
+-		call	grcg_fill
+-		call	grcg_off
+-		mov	_byte_26CC0, 0
+-		xor	ax, ax
+-		pop	bp
+-		retn
+-@mima_19C8D$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @mima_end$qv
+-@mima_end$qv	proc far
+-		push	bp
+-		mov	bp, sp
+-
+-		; ZUN bug: This renders Mima's sprite to [page_back] on top of the
+-		; boss background rendered earlier, right before animating the defeat
+-		; dialog on [page_front] and launching into MAINE.EXE, which means that
+-		; none of this will ever show up. Given the fact that this code exists,
+-		; it probably was ZUN's intention to render the defeat dialog on top of
+-		; what's rendered here - i.e, before rendering any player shot, item,
+-		; bullet, or spark sprites - rather than blindly printing the text on
+-		; top of whatever white VRAM pixels that may have been in the text box
+-		; area in the previous full frame.
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		push	_boss_left_on_page[bx]
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		push	_boss_top_on_page[bx]
+-		push	_patnum_2064E
+-		call	super_put_rect
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _boss_left_on_page[bx]
+-		add	ax, 48
+-		push	ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		push	_boss_top_on_page[bx]
+-		mov	ax, _patnum_2064E
+-		inc	ax
+-		push	ax
+-		call	super_put_rect
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		mov	ax, _boss_left_on_page[bx]
+-		add	ax, 96
+-		push	ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	bx, ax
+-		push	_boss_top_on_page[bx]
+-		mov	ax, _patnum_2064E
+-		add	ax, 2
+-		push	ax
+-		call	super_put_rect
+-		call	@dialog_script_stage5_post_animat$qv
+-		add	_score, 100000
+-		les	bx, _resident
+-		cmp	es:[bx+mikoconfig_t.continues_used], 0
+-		jnz	short loc_19E2A
+-		call	@scoredat_game_clear_save$qv
+-
+-loc_19E2A:
+-		call	mima_19C1D
+-		pop	bp
+-		retf
+-@mima_end$qv	endp
+-
+-
+-main_03_TEXT	ends
+-
+-	end
+diff --git a/th02/marisa.cpp b/th02/marisa.cpp
+index 7c13e32e..99a859b6 100644
+--- a/th02/marisa.cpp
++++ b/th02/marisa.cpp
+@@ -1,7 +1,7 @@
+ /* ReC98
+  * -----
+- * Stage 4 boss code (Marisa) of TH02 MAIN.EXE, at the end of the segment after
+- * skill_calculate()
++ * Stage 4 background, midboss and boss (Marisa) of TH02 MAIN.EXE, at the end of
++ * the main_03 segment. Compiled with -G, unlike the preceding boss_5.cpp.
+  */
+ 
+ #pragma option -zCmain_03_TEXT -zPmain_03 -G -a2
+diff --git a/th02_main.asm b/th02_main.asm
+index 8f77805c..50595968 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -1780,19 +1780,19 @@ public _angle_1EE54
+ _angle_1EE54	dw 0
+ public _word_1EE56
+ _word_1EE56	dw 0
+-public aMima_bft
+-aMima_bft	db 'mima.bft',0
+-public aMima1_bft
+-aMima1_bft	db 'mima1.bft',0
+-public aStage3_b_btt
+-aStage3_b_btt	db 'stage3_b.btt',0
+-public aMima_m
+-aMima_m		db 'mima.m',0
+-; char aMaine_0[]
+-public aMaine_0
+-aMaine_0	db 'maine',0
+-public aMima2_bft
+-aMima2_bft	db 'mima2.bft',0
++public _aMima_bft
++_aMima_bft	db 'mima.bft',0
++public _aMima1_bft
++_aMima1_bft	db 'mima1.bft',0
++public _aStage3_b_btt
++_aStage3_b_btt	db 'stage3_b.btt',0
++public _aMima_m
++_aMima_m		db 'mima.m',0
++; char _aMaine_0[]
++public _aMaine_0
++_aMaine_0	db 'maine',0
++public _aMima2_bft
++_aMima2_bft	db 'mima2.bft',0
+ 		db 0
+ public _MARISA_BG_COLORS
+ _MARISA_BG_COLORS	db  0Ah

@@ -1,0 +1,540 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 22:36:30 +0100
+Subject: [PATCH] Decompile the Marisa intro helpers sub_1A423..sub_1A6C5
+
+---
+ th02/main/boss/marisa.cpp | 140 +++++++++++++++-
+ th02/main_03_.asm         | 343 +-------------------------------------
+ 2 files changed, 135 insertions(+), 348 deletions(-)
+
+diff --git a/th02/main/boss/marisa.cpp b/th02/main/boss/marisa.cpp
+index 7bcc348c..7a3faf55 100644
+--- a/th02/main/boss/marisa.cpp
++++ b/th02/main/boss/marisa.cpp
+@@ -30,6 +30,8 @@
+ #include "planar.h"
+ #include "th02/hardware/frmdelay.h"
+ #include "th02/main/tile/tile.hpp"
++#include "th02/main/scroll.hpp"
++#include "th02/v_colors.hpp"
+ 
+ void near dialog_pre(void);
+ 
+@@ -106,18 +108,13 @@ extern char aStage3_b_bft[];
+ extern char aStage3_b_btt_0[];
+ extern char aBoss3_m[];
+ 
+-void near sub_1A6C5(void);
+-void near sub_1A46B(void);
+-void near sub_1A529(void);
+ void sub_13ABB(char far *fn);
+ void near marisa_1B214(void);
+ void shots_clear(void);
+ 
+-#define marisa_and_player_put() { \
+-	super_put_rect(marisa_topleft.x, marisa_topleft.y, patnum_2064E); \
+-	super_put_rect( \
+-		(marisa_topleft.x + 48), marisa_topleft.y, (patnum_2064E + 1) \
+-	); \
++extern vram_offset_t scroll_line_vo;
++
++#define player_and_options_put() { \
+ 	super_roll_put(player_topleft.x, player_topleft.y, PAT_PLAYCHAR_STILL); \
+ 	super_roll_put_tiny( \
+ 		player_option_left_topleft[page_back].x, \
+@@ -132,6 +129,133 @@ void shots_clear(void);
+ 	); \
+ }
+ 
++#define marisa_and_player_put() { \
++	super_put_rect(marisa_topleft.x, marisa_topleft.y, patnum_2064E); \
++	super_put_rect( \
++		(marisa_topleft.x + 48), marisa_topleft.y, (patnum_2064E + 1) \
++	); \
++	player_and_options_put(); \
++}
++
++void pascal near sub_1A423(screen_x_t left, screen_y_t top)
++{
++	register int col;
++	register int patnum;
++	int row;
++
++	patnum = 0;
++	for(row = 0; row < 8; row++) {
++		for(col = 0; col < 8; col++, patnum++) {
++			super_put((left + (col * 32)), (top + (row * 32)), (128 + patnum));
++		}
++	}
++}
++
++void near sub_1A46B(void)
++{
++	register int i;
++	register vram_y_t top_1 = 0;
++	vram_y_t top_2 = 0;
++
++	top_1 = 320;
++	top_1 += scroll_line;
++	if(top_1 >= RES_Y) {
++		top_1 -= RES_Y;
++	}
++	top_2 += (top_1 + 32);
++	if(top_2 >= RES_Y) {
++		top_2 -= RES_Y;
++	}
++	super_roll_put(32, top_1, 34);
++	super_roll_put(32, top_2, 42);
++	super_roll_put(64, top_1, 35);
++	super_roll_put(64, top_2, 43);
++	super_roll_put(96, top_1, 36);
++	super_roll_put(96, top_2, 44);
++	for(i = 0; i < 8; i++) {
++		super_roll_put(((i * 32) + 128), top_1, 37);
++		super_roll_put(((i * 32) + 128), top_2, 45);
++	}
++	super_roll_put(384, top_1, 38);
++	super_roll_put(384, top_2, 46);
++}
++
++void near sub_1A529(void)
++{
++	register int i;
++
++	grc_setclip(PLAYFIELD_LEFT, PLAYFIELD_TOP, PLAYFIELD_RIGHT, 320);
++	snd_se_play(9);
++	for(i = 150; i > 0; i--) {
++		grcg_setcolor(GC_RMW, 10);
++		grcg_circlefill(224, 144, i);
++		grcg_setcolor(GC_RMW, 13);
++		grcg_circle(224, 144, ((i % 50) * 4));
++		grcg_setcolor(GC_RMW, V_WHITE);
++		grcg_circle(224, 144, ((i % 30) * 7));
++		frame_delay(1);
++		grcg_setcolor(GC_RMW, 0);
++		grcg_circlefill(224, 144, i);
++		grcg_circle(224, 144, ((i % 50) * 4));
++		grcg_circle(224, 144, ((i % 30) * 7));
++		PaletteTone = ((((150 - i) / 3) * 2) + 100);
++		palette_show();
++		snd_se_update();
++	}
++	grcg_setcolor(GC_RMW, 0);
++	grcg_fill();
++	grcg_off();
++	sub_1A423(96, 0);
++	player_and_options_put();
++	sub_1A46B();
++	for(i = 0; i < 10; i++) {
++		PaletteTone = (200 - (i * 10));
++		palette_show();
++		frame_delay(3);
++	}
++	PaletteTone = 100;
++	palette_show();
++}
++
++void near sub_1A6C5(void)
++{
++	player_top_on_page[page_front] = player_topleft.y;
++	scroll_line = 0;
++	scroll_line_vo = 0;
++	graph_accesspage(0);
++	graph_clear();
++	graph_accesspage(1);
++	graph_clear();
++	vsync_Count1 = 0;
++	frame_delay(1);
++	graph_scrollup(0);
++	graph_accesspage(page_front);
++	super_roll_put(player_topleft.x, player_topleft.y, PAT_PLAYCHAR_STILL);
++	player_option_left_topleft[page_back].x = (
++		player_topleft.x - PLAYER_LEFT_TO_OPTION_LEFT_LEFT
++	);
++	player_option_left_topleft[page_back].y = (
++		player_topleft.y + ((PLAYER_H / 2) - (PLAYER_OPTION_H / 2))
++	);
++	player_option_left_topleft[page_front].x = (
++		player_option_left_topleft[page_back].x
++	);
++	player_option_left_topleft[page_front].y = (
++		player_option_left_topleft[page_back].y
++	);
++	super_roll_put_tiny(
++		player_option_left_topleft[page_back].x,
++		player_option_left_topleft[page_back].y,
++		PAT_OPTION_A
++	);
++	super_roll_put_tiny(
++		(player_option_left_topleft[page_back].x +
++		PLAYER_OPTION_TO_OPTION_DISTANCE),
++		player_option_left_topleft[page_back].y,
++		PAT_OPTION_A
++	);
++}
++
+ void marisa_init(void)
+ {
+ 	register int i;
+diff --git a/th02/main_03_.asm b/th02/main_03_.asm
+index 6557c390..320c709c 100644
+--- a/th02/main_03_.asm
++++ b/th02/main_03_.asm
+@@ -166,6 +166,9 @@ main_03_TEXT	segment	byte public 'CODE' use16
+ 	assume cs:main_03
+ 	extrn @sub_13ABB$qnc:proc
+ 	extrn @bullets_clear$qv:proc
++	extrn @sub_1A6C5$qv:near
++	extrn @sub_1A529$qv:near
++	extrn @sub_1A46B$qv:near
+ 
+ public @mima_init$qv
+ @mima_init$qv	proc far
+@@ -1203,346 +1206,6 @@ off_1A419	dw offset loc_1A38C
+ 		dw offset loc_1A39B
+ 		dw offset loc_1A3A0
+ 
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-sub_1A423	proc near
+-
+-var_2		= word ptr -2
+-arg_0		= word ptr  4
+-arg_2		= word ptr  6
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 2
+-		push	si
+-		push	di
+-		xor	di, di
+-		mov	[bp+var_2], 0
+-		jmp	short loc_1A45F
+-; ---------------------------------------------------------------------------
+-
+-loc_1A434:
+-		xor	si, si
+-		jmp	short loc_1A457
+-; ---------------------------------------------------------------------------
+-
+-loc_1A438:
+-		mov	ax, si
+-		shl	ax, 5
+-		add	ax, [bp+arg_2]
+-		push	ax
+-		mov	ax, [bp+var_2]
+-		shl	ax, 5
+-		add	ax, [bp+arg_0]
+-		push	ax
+-		lea	ax, [di+128]
+-		push	ax
+-		call	super_put
+-		inc	si
+-		inc	di
+-
+-loc_1A457:
+-		cmp	si, 8
+-		jl	short loc_1A438
+-		inc	[bp+var_2]
+-
+-loc_1A45F:
+-		cmp	[bp+var_2], 8
+-		jl	short loc_1A434
+-		pop	di
+-		pop	si
+-		leave
+-		retn	4
+-sub_1A423	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @sub_1A46B$qv
+-@sub_1A46B$qv	proc near
+-
+-@@y		= word ptr -2
+-
+-		push	bp
+-		mov	bp, sp
+-		sub	sp, 2
+-		push	si
+-		push	di
+-		xor	di, di
+-		mov	[bp+@@y], 0
+-		mov	di, 320
+-		add	di, _scroll_line
+-		cmp	di, RES_Y
+-		jl	short loc_1A48B
+-		sub	di, RES_Y
+-
+-loc_1A48B:
+-		lea	ax, [di+32]
+-		add	[bp+@@y], ax
+-		cmp	[bp+@@y], RES_Y
+-		jl	short loc_1A49D
+-		sub	[bp+@@y], RES_Y
+-
+-loc_1A49D:
+-		call	super_roll_put pascal, 32, di, 34
+-		call	super_roll_put pascal, 32, [bp+@@y], 42
+-		call	super_roll_put pascal, 64, di, 35
+-		call	super_roll_put pascal, 64, [bp+@@y], 43
+-		call	super_roll_put pascal, 96, di, 36
+-		call	super_roll_put pascal, 96, [bp+@@y], 44
+-		xor	si, si
+-		jmp	short loc_1A508
+-; ---------------------------------------------------------------------------
+-
+-loc_1A4E3:
+-		mov	ax, si
+-		shl	ax, 5
+-		add	ax, 128
+-		call	super_roll_put pascal, ax, di, 37
+-		mov	ax, si
+-		shl	ax, 5
+-		add	ax, 128
+-		call	super_roll_put pascal, ax, [bp+@@y], 45
+-		inc	si
+-
+-loc_1A508:
+-		cmp	si, 8
+-		jl	short loc_1A4E3
+-		call	super_roll_put pascal, 384, di, 38
+-		call	super_roll_put pascal, 384, [bp+@@y], 46
+-		pop	di
+-		pop	si
+-		leave
+-		retn
+-@sub_1A46B$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @sub_1A529$qv
+-@sub_1A529$qv	proc near
+-		push	bp
+-		mov	bp, sp
+-		push	si
+-		call	grc_setclip pascal, (PLAYFIELD_LEFT shl 16) or PLAYFIELD_TOP, (PLAYFIELD_RIGHT shl 16) or 320
+-		call	_snd_se_play c, 9
+-		mov	si, 96h
+-		jmp	loc_1A613
+-; ---------------------------------------------------------------------------
+-
+-loc_1A54E:
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + 10
+-		call	grcg_circlefill pascal, (224 shl 16) or 144, si
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + 13
+-		push	(224 shl 16) or 144
+-		mov	ax, si
+-		mov	bx, 50
+-		cwd
+-		idiv	bx
+-		shl	dx, 2
+-		push	dx
+-		call	grcg_circle
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + V_WHITE
+-		push	(224 shl 16) or 144
+-		mov	ax, si
+-		mov	bx, 30
+-		cwd
+-		idiv	bx
+-		imul	dx, 7
+-		push	dx
+-		call	grcg_circle
+-		call	@frame_delay$qi pascal, 1
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + 0
+-		call	grcg_circlefill pascal, (224 shl 16) or 144, si
+-		push	(224 shl 16) or 144
+-		mov	ax, si
+-		mov	bx, 50
+-		cwd
+-		idiv	bx
+-		shl	dx, 2
+-		push	dx
+-		call	grcg_circle
+-		push	(224 shl 16) or 144
+-		mov	ax, si
+-		mov	bx, 30
+-		cwd
+-		idiv	bx
+-		imul	dx, 7
+-		push	dx
+-		call	grcg_circle
+-		mov	ax, 150
+-		sub	ax, si
+-		mov	bx, 3
+-		cwd
+-		idiv	bx
+-		add	ax, ax
+-		add	ax, 100
+-		mov	PaletteTone, ax
+-		call	far ptr	palette_show
+-		call	_snd_se_update
+-		dec	si
+-
+-loc_1A613:
+-		or	si, si
+-		jg	loc_1A54E
+-		call	grcg_setcolor pascal, (GC_RMW shl 16) + 0
+-		call	grcg_fill
+-		call	grcg_off
+-		push	600000h
+-		call	sub_1A423
+-		call	super_roll_put pascal, _player_topleft.x, _player_topleft.y, PAT_PLAYCHAR_STILL
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		push	_player_option_left_topleft[bx].x
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		push	_player_option_left_topleft[bx].y
+-		push	PAT_OPTION_A
+-		call	super_roll_put_tiny
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		mov	ax, _player_option_left_topleft[bx].x
+-		add	ax, PLAYER_OPTION_TO_OPTION_DISTANCE
+-		push	ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		push	_player_option_left_topleft[bx].y
+-		push	PAT_OPTION_A
+-		call	super_roll_put_tiny
+-		call	@sub_1A46B$qv
+-		xor	si, si
+-		jmp	short loc_1A6B2
+-; ---------------------------------------------------------------------------
+-
+-loc_1A697:
+-		mov	ax, si
+-		imul	ax, 10
+-		mov	dx, 200
+-		sub	dx, ax
+-		mov	PaletteTone, dx
+-		call	far ptr	palette_show
+-		call	@frame_delay$qi pascal, 3
+-		inc	si
+-
+-loc_1A6B2:
+-		cmp	si, 10
+-		jl	short loc_1A697
+-		mov	PaletteTone, 100
+-		call	far ptr	palette_show
+-		pop	si
+-		pop	bp
+-		retn
+-@sub_1A529$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+-public @sub_1A6C5$qv
+-@sub_1A6C5$qv	proc near
+-		push	bp
+-		mov	bp, sp
+-		mov	al, _page_front
+-		mov	ah, 0
+-		add	ax, ax
+-		mov	dx, _player_topleft.y
+-		mov	bx, ax
+-		mov	_player_top_on_page[bx], dx
+-		mov	_scroll_line, 0
+-		mov	_scroll_line_vo, 0
+-		graph_accesspage 0
+-		call	graph_clear
+-		graph_accesspage 1
+-		call	graph_clear
+-		mov	vsync_Count1, 0
+-		call	@frame_delay$qi pascal, 1
+-		call	graph_scrollup pascal, 0
+-		graph_accesspage _page_front
+-		call	super_roll_put pascal, _player_topleft.x, _player_topleft.y, PAT_PLAYCHAR_STILL
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	dx, _player_topleft.x
+-		add	dx, -PLAYER_LEFT_TO_OPTION_LEFT_LEFT
+-		mov	bx, ax
+-		mov	_player_option_left_topleft[bx].x, dx
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	dx, _player_topleft.y
+-		add	dx, ((PLAYER_H / 2) - (PLAYER_OPTION_H / 2))
+-		mov	bx, ax
+-		mov	_player_option_left_topleft[bx].y, dx
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		mov	ax, _player_option_left_topleft[bx].x
+-		mov	dl, _page_front
+-		mov	dh, 0
+-		shl	dx, 2
+-		mov	bx, dx
+-		mov	_player_option_left_topleft[bx].x, ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		mov	ax, _player_option_left_topleft[bx].y
+-		mov	dl, _page_front
+-		mov	dh, 0
+-		shl	dx, 2
+-		mov	bx, dx
+-		mov	_player_option_left_topleft[bx].y, ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		push	_player_option_left_topleft[bx].x
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		push	_player_option_left_topleft[bx].y
+-		push	PAT_OPTION_A
+-		call	super_roll_put_tiny
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		mov	ax, _player_option_left_topleft[bx].x
+-		add	ax, PLAYER_OPTION_TO_OPTION_DISTANCE
+-		push	ax
+-		mov	al, _page_back
+-		mov	ah, 0
+-		shl	ax, 2
+-		mov	bx, ax
+-		push	_player_option_left_topleft[bx].y
+-		push	PAT_OPTION_A
+-		call	super_roll_put_tiny
+-		pop	bp
+-		retn
+-@sub_1A6C5$qv	endp
+-
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+ main_03_TEXT	ends
+ 
+ 	end

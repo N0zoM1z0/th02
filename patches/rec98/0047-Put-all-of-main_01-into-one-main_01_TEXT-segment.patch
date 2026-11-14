@@ -1,0 +1,364 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: N0zoM1z0 <161784452+N0zoM1z0@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 22:59:50 +0100
+Subject: [PATCH] Put all of main_01 into one main_01_TEXT segment
+
+All intra-group far calls in the original are shortened, so a single
+segment lets TLINK reproduce them and the eight inline-asm call
+stand-ins become natural calls. pointnum_put() is ZUN's hand-written
+assembly and moves into its own module between pointnum and shot.
+---
+ Tupfile.lua                      |  7 ++---
+ th02/main/hud/hud.cpp            |  2 +-
+ th02/main/item/item.cpp          |  2 +-
+ th02/main/player/bomb.cpp        |  1 +
+ th02/main/player/bombanim.cpp    |  2 +-
+ th02/main/player/player.cpp      |  7 ++---
+ th02/main/player/shot.cpp        |  2 +-
+ th02/main/pointnum/num_put_m.asm | 30 +++++++++++++++++++++
+ th02/main/pointnum/pointnum.cpp  |  2 +-
+ th02/main_01a.cpp                |  8 +++---
+ th02/main_01b.cpp                |  2 +-
+ th02/main_01c.cpp                |  4 +--
+ th02_main.asm                    | 46 ++------------------------------
+ 13 files changed, 51 insertions(+), 64 deletions(-)
+ create mode 100644 th02/main/pointnum/num_put_m.asm
+
+diff --git a/Tupfile.lua b/Tupfile.lua
+index d1a99b16..02e41bdd 100644
+--- a/Tupfile.lua
++++ b/Tupfile.lua
+@@ -520,7 +520,11 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/spark.cpp",
+ 	"th02/spark_i.asm",
+ 	"th02/tile.cpp",
++	"th02/main_01a.cpp",
++	"th02/main_01b.cpp",
++	"th02/main_01c.cpp",
+ 	"th02/pointnum.cpp",
++	"th02/main/pointnum/num_put_m.asm",
+ 	"th02/main/player/shot.cpp",
+ 	"th02/item.cpp",
+ 	"th02/hud.cpp",
+@@ -530,9 +534,6 @@ th02:branch(MODEL_LARGE, { cflags = "-DBINARY='M'" }):link("main", {
+ 	"th02/zunerror.cpp",
+ 	"th02/keydelay.cpp",
+ 	"th02/main02_1.cpp",
+-	"th02/main_01a.cpp",
+-	"th02/main_01b.cpp",
+-	"th02/main_01c.cpp",
+ 	"th01/vplanset.cpp",
+ 	"th02/pi_load.cpp",
+ 	"th02/vector.cpp",
+diff --git a/th02/main/hud/hud.cpp b/th02/main/hud/hud.cpp
+index e1ceca77..c693393c 100644
+--- a/th02/main/hud/hud.cpp
++++ b/th02/main/hud/hud.cpp
+@@ -1,4 +1,4 @@
+-#pragma option -G
++#pragma option -zCmain_01_TEXT -G
+ 
+ #include "shiftjis.hpp"
+ #include "libs/master.lib/pc98_gfx.hpp"
+diff --git a/th02/main/item/item.cpp b/th02/main/item/item.cpp
+index 18791f3e..f9d2fd1e 100644
+--- a/th02/main/item/item.cpp
++++ b/th02/main/item/item.cpp
+@@ -1,4 +1,4 @@
+-#pragma option -zPmain_01 -G
++#pragma option -zCmain_01_TEXT -zPmain_01 -G
+ 
+ #include "libs/master.lib/pc98_gfx.hpp"
+ #include "th01/rank.h"
+diff --git a/th02/main/player/bomb.cpp b/th02/main/player/bomb.cpp
+index 8c925ff1..9e76eef3 100644
+--- a/th02/main/player/bomb.cpp
++++ b/th02/main/player/bomb.cpp
+@@ -1,3 +1,4 @@
++#pragma option -zCmain_01_TEXT
+ #include "libs/master.lib/pc98_gfx.hpp"
+ #include "th01/math/overlap.hpp"
+ #include "th02/main/playfld.hpp"
+diff --git a/th02/main/player/bombanim.cpp b/th02/main/player/bombanim.cpp
+index 96860860..68e09edb 100644
+--- a/th02/main/player/bombanim.cpp
++++ b/th02/main/player/bombanim.cpp
+@@ -4,7 +4,7 @@
+  * MAIN.EXE
+  */
+ 
+-#pragma option -zCmain_01___TEXT -zPmain_01 -G
++#pragma option -zCmain_01_TEXT -zPmain_01 -G
+ 
+ #include "platform.h"
+ #include "x86real.h"
+diff --git a/th02/main/player/player.cpp b/th02/main/player/player.cpp
+index 897278f3..7be26c38 100644
+--- a/th02/main/player/player.cpp
++++ b/th02/main/player/player.cpp
+@@ -1,4 +1,4 @@
+-#pragma option -zPmain_01 -G
++#pragma option -zCmain_01_TEXT -zPmain_01 -G
+ 
+ #include "th02/main/player/player.hpp"
+ #include "th02/main/player/shot.hpp"
+@@ -147,10 +147,7 @@ void near player_miss_update_and_render(void)
+ 		// means that any existing [score_delta] will stop being animated. The
+ 		// score display will therefore only refresh with the correct value
+ 		// after the player gained another point.
+-		/* TODO: Replace with the decompiled call
+-		 * 	score_delta_commit();
+-		 * once that function is part of the same segment */
+-		_asm { nop; push cs; call near ptr score_delta_commit; }
++		score_delta_commit();
+ 
+ 		total_miss_count++;
+ 		player_miss_sparks_add(16);
+diff --git a/th02/main/player/shot.cpp b/th02/main/player/shot.cpp
+index 7d315b51..2dfa931f 100644
+--- a/th02/main/player/shot.cpp
++++ b/th02/main/player/shot.cpp
+@@ -3,7 +3,7 @@
+  * Scroll reset, and the player's shot types, of TH02's MAIN.EXE
+  */
+ 
+-#pragma option -zCmain_01__TEXT -zPmain_01 -G -a2
++#pragma option -zCmain_01_TEXT -zPmain_01 -G -a2
+ 
+ #include "platform.h"
+ #include "x86real.h"
+diff --git a/th02/main/pointnum/num_put_m.asm b/th02/main/pointnum/num_put_m.asm
+new file mode 100644
+index 00000000..140ae265
+--- /dev/null
++++ b/th02/main/pointnum/num_put_m.asm
+@@ -0,0 +1,30 @@
++; ReC98
++; -----
++; ZUN's hand-written pointnum_put() between the pointnum and shot TUs, as its
++; own module so that all of main_01 can share one code segment.
++
++	.386
++	locals
++
++BYTE_DOTS = 8
++RES_X = 640
++RES_Y = 400
++ROW_SIZE = (RES_X / BYTE_DOTS)
++PLANE_SIZE = (ROW_SIZE * RES_Y)
++POINTNUM_H = 8
++
++_DATA	segment word public 'DATA' use16
++	extrn _sPOINTNUMS:byte
++_DATA	ends
++
++DGROUP group _DATA
++
++main_01 group main_01_TEXT
++main_01_TEXT	segment	word public 'CODE' use16
++	assume cs:main_01, ds:DGROUP
++
++include th02/main/pointnum/num_put.asm
++
++main_01_TEXT	ends
++
++	end
+diff --git a/th02/main/pointnum/pointnum.cpp b/th02/main/pointnum/pointnum.cpp
+index 7f2b031b..f3a215e9 100644
+--- a/th02/main/pointnum/pointnum.cpp
++++ b/th02/main/pointnum/pointnum.cpp
+@@ -1,4 +1,4 @@
+-#pragma option -zPmain_01 -G
++#pragma option -zCmain_01_TEXT -zPmain_01 -G
+ 
+ #include "libs/master.lib/pc98_gfx.hpp"
+ #include "th01/rank.h"
+diff --git a/th02/main_01a.cpp b/th02/main_01a.cpp
+index f240cf50..49effdaa 100644
+--- a/th02/main_01a.cpp
++++ b/th02/main_01a.cpp
+@@ -168,7 +168,7 @@ int main(void)
+ next_stage:
+ 	random_seed = resident->frame;
+ 	stage_init();
+-	asm { nop; push cs; call near ptr overlay_stage_enter_animate; }
++	overlay_stage_enter_animate();
+ 	if(resident->demo_num == 0) {
+ 		if(stage_id == 5) {
+ 			gaiji_putsa(16, 12, gEXTRA_STAGE, TX_YELLOW);
+@@ -285,7 +285,7 @@ void near stage_init(void)
+ 	sub_E271();
+ 	snd_se_reset();
+ 	sub_1028C();
+-	asm { nop; push cs; call near ptr sub_CA1C; }
++	sub_CA1C();
+ 	randring_fill();
+ 	PaletteTone = 100;
+ 	palette_show();
+@@ -433,7 +433,7 @@ void near stage_init(void)
+ void near stage_continue_reset(void)
+ {
+ 	hud_put();
+-	asm { nop; push cs; call near ptr overlay_stage_leave_animate; }
++	overlay_stage_leave_animate();
+ 	player_left_on_page[0] = player_left_on_page[1] = PLAYER_LEFT_START;
+ 	player_top_on_page[0] = player_top_on_page[1] = PLAYER_TOP_START;
+ 	sub_C5B0();
+@@ -445,7 +445,7 @@ void near stage_continue_reset(void)
+ 	bullets_clear();
+ 	PaletteTone = 100;
+ 	palette_show();
+-	asm { nop; push cs; call near ptr overlay_stage_enter_animate; }
++	overlay_stage_enter_animate();
+ }
+ 
+ extern const char far *PAUSE_CHOICE_RESUME;
+diff --git a/th02/main_01b.cpp b/th02/main_01b.cpp
+index 9ef0089f..53c6c365 100644
+--- a/th02/main_01b.cpp
++++ b/th02/main_01b.cpp
+@@ -226,7 +226,7 @@ frame_end:
+ 		playperf_raise_over_time();
+ 		score_update_and_render();
+ 	}
+-	asm { nop; push cs; call near ptr score_delta_commit; }
++	score_delta_commit();
+ 	quit = false;
+ 	return 0;
+ }
+diff --git a/th02/main_01c.cpp b/th02/main_01c.cpp
+index bc39a529..4f2036ad 100644
+--- a/th02/main_01c.cpp
++++ b/th02/main_01c.cpp
+@@ -79,10 +79,10 @@ int near gameover_and_continue_menu(void)
+ 	int i;
+ 	int choice = 1;
+ 
+-	asm { nop; push cs; call near ptr overlay_stage_leave_animate; }
++	overlay_stage_leave_animate();
+ 	PaletteTone = 50;
+ 	palette_show();
+-	asm { nop; push cs; call near ptr overlay_stage_enter_animate; }
++	overlay_stage_enter_animate();
+ 	for(i = 21; i >= 12; i--) {
+ 		text_putsa(18, (i + 1), asc_1E47E, TX_WHITE);
+ 		gaiji_putsa(18, i, gGAMEOVER, TX_WHITE);
+diff --git a/th02_main.asm b/th02_main.asm
+index f450b4d0..8dcabc38 100644
+--- a/th02_main.asm
++++ b/th02_main.asm
+@@ -73,7 +73,7 @@ FACE_EXRIKA_SMILE = 153
+ FACE_EXRIKA_FROWN = 156
+ FACE_COL_0 = 255
+ 
+-main_01 group main_01_TEXT, MAIN_01A_TEXT, MAIN_01B_TEXT, MAIN_01C_TEXT, POINTNUM_TEXT, main_01__TEXT, ITEM_TEXT, HUD_TEXT, main_01___TEXT, PLAYER_B_TEXT, PLAYER_TEXT, main_01____TEXT
++main_01 group main_01_TEXT
+ main_03 group main_03_TEXT, BULLET_TEXT, DIALOG_TEXT, BOSS_5_TEXT, main_03__TEXT
+ main_06 group REGIST_M_TEXT, main_06_TEXT
+ 
+@@ -219,16 +219,10 @@ main_01_TEXT	segment	word public 'CODE' use16
+ ; int __cdecl main(int _argc, const char **_argv, const	char **_envp)
+ 	extern _main:proc
+ 	extern @main_init$qv:near
+-main_01_TEXT	ends
+-
+-MAIN_01A_TEXT	segment	byte public 'CODE' use16
+ 	extern @STAGE_FN_SET_EXT$QNZCNXZC:near
+ 	extern @stage_init$qv:near
+ 	extern @stage_continue_reset$qv:near
+ 	extern @pause_menu$qv:near
+-MAIN_01A_TEXT	ends
+-
+-MAIN_01B_TEXT	segment	byte public 'CODE' use16
+ 	extern @stage_loop$qv:proc
+ 	extern TEXT_WIPE:near
+ 	extern @nullfunc_void$qv:proc
+@@ -243,29 +237,14 @@ MAIN_01B_TEXT	segment	byte public 'CODE' use16
+ 	extern @randring1_next8$qv:near
+ 	extern @RANDRING1_NEXT8_AND$QUC:near
+ 	extern @randring1_next16$qv:near
+-MAIN_01B_TEXT	ends
+-
+-MAIN_01C_TEXT	segment	byte public 'CODE' use16
+ 	extern @cfg_load$qv:near
+ 	extern @gameover_and_continue_menu$qv:near
+ 	extern @GameExecl$qnc:proc
+ 	extern @sub_C5B0$qv:near
+ 	extern @player_invalidate$qv:near
+-MAIN_01C_TEXT	ends
+-
+-POINTNUM_TEXT	segment	byte public 'CODE' use16
+ 	@pointnums_init_for_rank_and_rese$qv procdesc near
+ 	@pointnums_invalidate$qv procdesc near
+ 	@pointnums_update_and_render$qv procdesc near
+-POINTNUM_TEXT	ends
+-
+-main_01__TEXT	segment	word public 'CODE' use16
+-include th02/main/pointnum/num_put.asm
+-
+-; =============== S U B	R O U T	I N E =======================================
+-
+-; Attributes: bp-based frame
+-
+ 	extern @sub_CA1C$qv:proc
+ 	extern @shot_a$qv:near
+ 	extern @shot_b$qv:near
+@@ -273,17 +252,11 @@ include th02/main/pointnum/num_put.asm
+ 	extern @shots_clear$qv:proc
+ 	extern @shots_invalidate$qv:near
+ 	extern @shots_update_and_render$qv:near
+-main_01__TEXT	ends
+-
+-ITEM_TEXT	segment	byte public 'CODE' use16
+ 	@items_init_and_reset$qv procdesc near
+ 	extern @ITEMS_ADD_SEMIRANDOM$QII:proc
+ 	extern @ITEMS_ADD$QIII:proc
+ 	@items_invalidate$qv procdesc near
+ 	@items_update_and_render$qv procdesc near
+-ITEM_TEXT	ends
+-
+-HUD_TEXT	segment	byte public 'CODE' use16
+ 	@gaiji_load$qv procdesc near
+ 	@gaiji_free$qv procdesc near
+ 	@score_extend_init$qv procdesc near
+@@ -296,9 +269,6 @@ HUD_TEXT	segment	byte public 'CODE' use16
+ 	@hud_put$qv procdesc near
+ 	extern @overlay_stage_leave_animate$qv:proc
+ 	extern @overlay_stage_enter_animate$qv:proc
+-HUD_TEXT	ends
+-
+-main_01___TEXT	segment	byte public 'CODE' use16
+ 	extern @sub_E178$qv:near
+ 	extern @sub_E24A$qv:near
+ 	extern @sub_E271$qv:near
+@@ -308,9 +278,6 @@ main_01___TEXT	segment	byte public 'CODE' use16
+ 	extern BOMB_REIMU_A:near
+ 	extern BOMB_REIMU_B:near
+ 	extern BOMB_REIMU_C:near
+-main_01___TEXT	ends
+-
+-PLAYER_B_TEXT	segment	byte public 'CODE' use16
+ 	@bomb_update_and_render$qv procdesc near
+ 	@BOMB_CIRCLE_POINT_PUT$QII procdesc pascal near \
+ 		left:word, top:word
+@@ -320,19 +287,10 @@ PLAYER_B_TEXT	segment	byte public 'CODE' use16
+ 		left:word
+ 	@BOMB_BFT_8TILES_PUT_8$QIIUC procdesc pascal near \
+ 		left:word, top:word, eight_tiles:byte
+-PLAYER_B_TEXT	ends
+-
+-PLAYER_TEXT	segment	byte public 'CODE' use16
+ 	@PLAYER_MOVE$QII procdesc pascal near \
+ 		delta_x:word, delta_y:word
+ 	@player_update_and_render$qv procdesc near
+-PLAYER_TEXT ends
+-
+-main_01____TEXT	segment	byte public 'CODE' use16
+-
+-
+-; ---------------------------------------------------------------------------
+-main_01____TEXT	ends
++main_01_TEXT	ends
+ 
+ ; ===========================================================================
+ 

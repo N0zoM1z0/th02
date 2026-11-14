@@ -4,36 +4,28 @@
 
 - OP.EXE, MAIN.EXE and MAINE.EXE program images are byte-identical to the
   originals, with equal relocation sets. ZUN.COM is byte-identical as a file.
-  Only EXE headers and relocation *order* still differ (whole-product work).
+  MAIN's EXE header now matches too; only the relocation table *order*
+  differs (see "Relocation order" below).
 - Work lives on branch `th02-recon` of the ReC98 worktree
   `.analysis/work/rec98` and is exported as `patches/rec98/*.patch`
   (`git format-patch b6ba5b0a52..th02-recon`). `scripts/build_th02.py`
   applies the series to a cold `git archive` and rebuilds everything.
 
-Decompiled beyond ReC98 so far (all byte-exact; cold run `session4-cold1`):
-- MAIN code group 1 is entirely C++ except ReC98's `pointnum_put()` include:
-  `main()` and init, stage init/loop/pause, boss/BGM/demo callbacks, config
-  loading, game over/continue, `GameExecl()`, player init
-  (`th02/main_01a.cpp`, `main_01b.cpp`, `main_01c.cpp`), all shot code
-  (`th02/main/player/shot.cpp`) and bombs (`th02/main/player/bombanim.cpp`).
-- MAIN_03: the boss explosion/reset functions at the start of BULLET_TEXT
-  (`th02/main/boss/explode.cpp`), the pillar objects before the dialog code
-  (`th02/main/pillar.cpp`), the Mima block in BOSS_5_TEXT and Marisa from
-  `marisa_1AB35` on (`th02/mima.cpp`, `th02/marisa.cpp`).
-- MAIN_04 circle helpers, MAIN_05 stage data loader, MAIN_06 score savers,
-  player controls in `player.cpp`.
-- MAINE's game code is entirely C++.
+All ZUN C code in MAIN is now C++ (byte-exact, quick loop; last cold run
+`session4-cold1` predates the latest patches). What remains assembly:
+- `pointnum_put()` (`th02/main/pointnum/num_put_m.asm`) and `pfopen()`
+  (`th02/main/pf.asm`): hand-written by ZUN, like their TH04/TH05 siblings.
+- `sub_3F8A()` (`th02/main/dots_upd.asm`): its call to `vector2()` in SHARED
+  is `push cs / call near` in the original, which TLINK 6.10 only produces
+  within one physical segment. A natural far call gives an extra relocation.
+- `shots_hittest()` (`th02/main/hittest.asm`): the C++ version differs only
+  in the final reload of `damage`.
+- master.lib code and all data stay in `th02_main.asm`.
 
-Since then also C++ and byte-exact: all of DIALOG_TEXT except
-`shots_hittest()` (stage 3 in `th02/stage3.cpp`), the stage enemy system
-(`th02/main/enemy/enemy.cpp`), stage 2 with Meira
-(`th02/main/boss/meira.cpp`), and the Extra Stage midboss and Sigma
-(`th02/main/boss/sigma.cpp`).
-
-Still assembly in MAIN: BOSS_5_TEXT stage 1 (`sub_134B6` … `rika_update`,
-before `meira.cpp`), `shots_hittest()` (own module `th02/main/hittest.asm`),
-main_03__TEXT head (`mima_init` … `marisa_1AA60`, plus `sub_1A6C5`), and ZUN
-code inside `_TEXT`.
+Recent structure changes: main_01 and main_03 are each one code segment
+(`-zCmain_01_TEXT`, `-zCmain_03_TEXT`), so all intra-group calls are natural.
+The original has no unshortened far call inside either group, which makes
+the merge safe. `Tupfile.lua`'s MAIN list now follows `obj/th02/main.@l`.
 
 ## Loop
 
@@ -117,6 +109,13 @@ disassembly; `th02_asmedit.py` removes/exports procedures and data labels.
   (`shots_clear()`, `sub_C5B0()`); a plain `int page = page_back * 2` local
   lands in CX/DX, while `register` changes the choice.
 - TCC 4.02 rejects `-Oc`/`-Og` etc. in `#pragma option`.
+- Without `-G`, TCC opens frames with locals using `enter`; `-G` gives
+  `push bp / mov bp, sp / sub sp`. `-G` also cleans one cdecl argument with
+  `add sp, 2` instead of `pop cx` (Mima's defeat code is therefore not `-G`).
+- `-a2` does not align functions. Inter-function `nop`s in `_TEXT` follow
+  ReC98's `#pragma codestring "\x90"` (`spark.cpp`, `dots.cpp`).
+- `p = dots` into a register pointer is `mov si, offset`; the original's
+  `mov ax, offset / mov si, ax` is `_AX = FP_OFF(dots); p = (T near *)_AX;`.
 - Byte pairs written by one 16-bit store (`shot_t` flag/age,
   patnum/from_option) need an explicit 16-bit write.
 - Struct copies from an initialized constant (`bomb_reimu_c()` speeds,
@@ -139,12 +138,32 @@ disassembly; `th02_asmedit.py` removes/exports procedures and data labels.
   duplicated code first. A jump into the middle of another branch needs `goto`
   (`mima_183D0`).
 
+## Relocation order
+
+TLINK writes relocations module by module in link order; within a TCC object,
+each LEDATA chunk's fixups come out highest address first. The target's
+table therefore shows ZUN's original object order and TU boundaries when
+each target relocation is mapped to its module in `obj/th02/main.map`:
+- After `c0`, the first object is one TU spanning `main_01a.cpp` and most of
+  `main_01b.cpp`, followed by its own `_DATA` (the far pointers at
+  `DGROUP:00FE`-`0110`, pause/quit strings).
+- Then `_TEXT` code from `GRAPH_PI_FREE` to `VSYNC_START`, the SHARED objects
+  `keydelay` … `vector`, `pfint21`/`PFEND`, then `exit` … `pi_put`.
+- The next TU starts at the end of `main_01b.cpp` and continues with
+  `main_01c.cpp`; `hud_ovrl.cpp`'s MAIN_03 code sits *inside* it, so ZUN's
+  TUs switched code segments.
+- Further interleavings: `explode`/`bullet` (MAIN_03) between `shot` and
+  `item`; `bombanim` and `player_b` are one TU; `main_04` before `player`;
+  `stage3`, `hittest`, `main_05`, `pillar`, `dialog`, `rika`, `meira`,
+  `regist_m`, one `_DATA` relocation, `sigma`, `enemy`, then `mima` and
+  `boss_5` as one TU, then `marisa`, then the C runtime.
+Reproducing this needs `th02_main.asm`'s relocation-bearing code and data
+moved into modules at those link positions, while keeping each segment's
+contributor order.
+
 ## Next useful actions
 
-1. BOSS_5_TEXT stage 1 (stage 1 background particles `sub_134B6` …,
-   midboss 1, Rika) as one TU before `meira.cpp`.
-2. main_03__TEXT head and `sub_1A6C5`; `shots_hittest()`'s final reload.
-3. ZUN code inside `_TEXT` (`pfopen`, `mpn_put_8`, …).
-4. Merge each original code segment group into one physical segment
-   (split `th02_main.asm` into modules) to drop the nopcall stand-ins.
-5. Whole-product identity: header size and relocation order.
+1. Relocation order: reorder `main.@l` and split `th02_main.asm` as above,
+   checking the order with the relocation-to-module mapping.
+2. `shots_hittest()`'s final reload.
+3. Cold rebuild (`build_th02.py --write-ledger`) and progress regeneration.
