@@ -6,7 +6,7 @@
   and relocation table included). ZUN.COM is identical as a file. MAINE.EXE
   has an identical program image and relocation table; only its header
   format differs (see "Linking" below). Verified by cold run
-  `session5-cold2`.
+  `session5-cold3`.
 - Work lives on branch `th02-recon` of the ReC98 worktree
   `.analysis/work/rec98` and is exported as `patches/rec98/*.patch`
   (`git format-patch b6ba5b0a52..th02-recon`). `scripts/build_th02.py`
