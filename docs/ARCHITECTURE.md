@@ -42,6 +42,15 @@ product link, whether it is C/C++ or ASM, and the CODE bytes it contributes
 in the linker map. Details and the verification result are in
 `docs/REC98_IMPORT.md`.
 
-All reconstruction work is a patch series on the pinned ReC98 tree
-(`patches/rec98/`), so it stays reviewable against ReC98 and can go upstream.
-`src/` holds no product source yet.
+Our source lives in this repository, separate from ReC98:
+
+- `src/main`, `src/op`, `src/maine`, `src/zun`: product source. `src/shared`
+  holds files used by more than one TH02 program, and `units/` the
+  translation-unit files of a link (ReC98's top-level `th02/*.cpp`).
+- `compat/rec98/`: ReC98 infrastructure that TH02 needed changed
+  (`Tupfile.lua` link lists, `ReC98.inc`, `planar.h`, `platform/array.hpp`).
+
+`config/rec98_overlay.toml` gives each file's ReC98 path. Builds copy them
+byte-for-byte over a `git archive` of the pin, so source keeps ReC98's include
+paths. Files ReC98 already had and we did not touch are built unchanged from
+the pin and are not copied here.

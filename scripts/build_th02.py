@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build TH02 from pinned ReC98 plus this repository's patches, then compare.
+"""Build TH02 from pinned ReC98 plus this repository's source, then compare.
 
 1. `git archive` the pinned ReC98 revision into a fresh private run directory.
-2. Apply every `patches/rec98/*.patch` in name order (`git apply`).
+2. Copy this repository's files over it (`config/rec98_overlay.toml`).
 3. Run ReC98's `build.bat` with the attested Borland toolchain under Wine.
 4. Write the per-contribution ledger and print the strict raw comparison.
 
@@ -22,16 +22,16 @@ import sys
 
 from cold_build_rec98 import REFERENCE, REVISION
 from lib.pc98 import digest_file
+import rec98_overlay
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PATCHES = ROOT / "patches" / "rec98"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", default=datetime.now(timezone.utc).strftime("th02-%Y%m%dT%H%M%SZ"))
-    parser.add_argument("--no-patches", action="store_true", help="build unpatched ReC98")
+    parser.add_argument("--no-overlay", action="store_true", help="build unmodified ReC98")
     parser.add_argument("--write-ledger", action="store_true", help="update config/rec98_th02_units.csv")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", args.run_id):
@@ -47,13 +47,9 @@ def main() -> int:
                              check=True, capture_output=True).stdout
     subprocess.run(["tar", "-x", "-C", str(source)], input=archive, check=True)
 
-    patches = [] if args.no_patches else sorted(PATCHES.glob("*.patch"))
-    if patches:
-        # The run directory lives inside this repository; give the tree its
-        # own repository so that `git apply` resolves paths against it.
-        subprocess.run(["git", "init", "-q"], cwd=source, check=True)
-        subprocess.run(["git", "apply", "--whitespace=nowarn", *map(str, patches)],
-                       cwd=source, check=True)
+    overlay = {} if args.no_overlay else rec98_overlay.files()
+    if overlay:
+        rec98_overlay.apply(source)
 
     environment = os.environ.copy()
     environment.update({
@@ -69,7 +65,7 @@ def main() -> int:
     outputs = {path.name: digest_file(path) for path in sorted((source / "bin" / "th02").glob("*"))}
     receipt = {
         "rec98_revision": REVISION,
-        "patches": {path.name: digest_file(path) for path in patches},
+        "overlay": {local: digest_file(ROOT / local) for local in overlay},
         "returncode": completed.returncode,
         "th02_outputs": outputs,
     }

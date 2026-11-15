@@ -15,8 +15,8 @@ Story of Eastern Wonderland** (`OP.EXE`, `MAIN.EXE`, `MAINE.EXE`, `ZUN.COM`).
 
 All four files (`OP.EXE`, `MAIN.EXE`, `MAINE.EXE`, `ZUN.COM`) rebuild
 byte-identical to the originals from a cold build of the pinned
-[ReC98](https://github.com/nmlgc/ReC98) revision plus the patch series in
-`patches/rec98/`. ReC98 had already decompiled most of TH02 outside MAIN's
+[ReC98](https://github.com/nmlgc/ReC98) revision plus this repository's
+source in `src/`. ReC98 had already decompiled most of TH02 outside MAIN's
 gameplay; this project decompiled the rest of MAIN, including the stage and
 boss code, and moved ZUN's remaining data into C++.
 
@@ -62,5 +62,6 @@ created Touhou Project and the original TH02 game, characters, artwork and music
   analysis, DOS toolchain execution and disk-image extraction.
 
 Project-authored code and documentation use the [MIT License](LICENSE).
-Patches under `patches/rec98/` modify ReC98 files and are offered for
-upstream use.
+Files under `src/` and `compat/rec98/` that started as ReC98 files keep
+ReC98's credit and are offered for upstream use; ReC98 itself is not
+redistributed here.

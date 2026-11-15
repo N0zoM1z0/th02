@@ -3,5 +3,7 @@
 *.cmd text eol=crlf
 # Pinned compiler fixture bytes include their original final blank line.
 probes/toolchain/* whitespace=-blank-at-eof
-# ReC98 patches must apply byte-for-byte to the pinned tree.
-patches/** -text -whitespace
+# Maintained files are copied byte-for-byte into the pinned ReC98 tree
+# (ReC98's assembly files use CRLF).
+src/** -text whitespace=cr-at-eol
+compat/rec98/** -text whitespace=cr-at-eol

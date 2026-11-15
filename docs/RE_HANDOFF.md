@@ -3,22 +3,24 @@
 ## State
 
 - OP.EXE, MAIN.EXE, MAINE.EXE and ZUN.COM are identical to the originals as
-  whole files, from a cold build of the patch series (`session5-cold16`).
-- Work lives on branch `th02-recon` of the ReC98 worktree
-  `.analysis/work/rec98` and is exported as `patches/rec98/*.patch`
-  (`git format-patch b6ba5b0a52..th02-recon`). `scripts/build_th02.py`
-  applies the series to a cold `git archive` and rebuilds everything.
+  whole files, from a cold build (`session6-overlay1`).
+- Our source lives in `src/{op,main,maine,shared,zun}` and the modified ReC98
+  infrastructure (`Tupfile.lua`, `ReC98.inc`, `planar.h`,
+  `platform/array.hpp`) in `compat/rec98/`. `config/rec98_overlay.toml` maps
+  each file to its ReC98 path; `scripts/build_th02.py` copies them over a cold
+  `git archive` of the pin and rebuilds everything. Every other file is ReC98
+  unchanged.
 
 All ZUN C code in MAIN is C++. What remains assembly:
-- ZUN.COM's ZUNINIT (`th02/zuninit.asm`, also TH03's `-2`): ZUN's resident
+- ZUN.COM's ZUNINIT (`src/zun/zuninit.asm`, also TH03's `-2`): ZUN's resident
   INT 59h/05h/06h handlers, now named and commented. ONGCHK is assembled from
-  `libs/kaja/ongchk.asm` (KAJA's code, recovered in our TH03 reconstruction)
+  `src/zun/ongchk.asm` (KAJA's code, recovered in our TH03 reconstruction)
   instead of the prebuilt `ongchk.com`; TH03-TH05 still use the binary.
-- `pointnum_put()` (`th02/main/pointnum/num_put_m.asm`) and `pfopen()`
-  (`th02/main/pf.asm`): hand-written by ZUN, like their TH04/TH05 siblings.
+- `pointnum_put()` (`src/main/pointnum/num_put_m.asm`) and `pfopen()`
+  (`src/main/pf.asm`): hand-written by ZUN, like their TH04/TH05 siblings.
 - `sub_3F8A()` is C++ at the end of `dots.cpp`. Its near call into SHARED
   uses `spark.cpp`'s inline-asm form with a `near` `vector2()` declaration.
-- `shots_hittest()` (`th02/main/hittest.asm`): ZUN's own assembly module. The
+- `shots_hittest()` (`src/main/hittest.asm`): ZUN's own assembly module. The
   target lists its relocations in ascending (TASM) order, and its code
   segment is word-aligned (a `00` pad after stage 3), which TCC never emits.
   The final `damage` reload follows the 16-bit `add` into `score_delta`.
@@ -31,11 +33,11 @@ All ZUN C code in MAIN is C++. What remains assembly:
   (`keydelay.cpp`, `frmdely1`'s neighbours `maine022.cpp`/`main02_2.cpp`,
   pfopen's data in `pf.asm`). All of ZUN's uninitialized variables are
   C++ too; `.data?` in `th02_*.asm` is master.lib only. The blocks shared
-  with TH01/TH03-05 got TH02-only owner TUs: `th02/vplanset.cpp` (the four
+  with TH01/TH03-05 got TH02-only owner TUs: `src/shared/units/vplanset.cpp` (the four
   plane pointers as separate variables; `planar.h` makes `VRAM_PLANE`
   `&VRAM_PLANE_B` for TH02, since array subscripts change codegen),
-  `th02/pi_load.cpp`, `th02/input_rs.cpp` (`key_det`, then the `snd_*` flags;
-  in C they would become communals), `th02/snd_ld_2.cpp`, and pfint21's BSS
+  `src/shared/units/pi_load.cpp`, `src/shared/units/input_rs.cpp` (`key_det`, then the `snd_*` flags;
+  in C they would become communals), `src/shared/units/snd_ld_2.cpp`, and pfint21's BSS
   in `pf.asm`. Unlabeled gaps were real data:
   oversized arrays (the bomb TU's 50-element tables) or unused variables
   (`map_unused`, `tile_ring_unused`); TCC aligns neither byte-sized enums
@@ -44,17 +46,14 @@ All ZUN C code in MAIN is C++. What remains assembly:
 ## Loop
 
 ```sh
-# edit .analysis/work/rec98, then:
-python3 scripts/th02_quick.py main [--asm] [th02/foo.cpp ...]   # ~3 s
-git -C .analysis/work/rec98 commit -am "..."
-rm patches/rec98/*.patch && git -C .analysis/work/rec98 format-patch -q \
-  --no-signature --zero-commit -N b6ba5b0a529edbb31efdf8c0e939263804f8ee47..th02-recon \
-  -o "$PWD/patches/rec98/"
+# edit src/ (new file: add it to config/rec98_overlay.toml), then:
+python3 scripts/rec98_overlay.py                                 # into .analysis/work/rec98
+python3 scripts/th02_quick.py main [--asm] [th02/foo.cpp ...]   # ~3 s, ReC98 paths
 python3 scripts/build_th02.py --run-id NAME --write-ledger && python3 scripts/progress.py
 ```
 
 `th02_quick.py` relinks from `obj/th02/<product>.@l`; add new objects there
-and to `Tupfile.lua`. `th02_sbs.py main START LEN` diffs one function's
+and to `compat/rec98/Tupfile.lua`. `th02_sbs.py main START LEN` diffs one function's
 disassembly; `th02_asmedit.py` removes/exports procedures and data labels.
 
 ## Compiler findings (TCC 4.02, verified on MAIN)
@@ -80,7 +79,7 @@ disassembly; `th02_asmedit.py` removes/exports procedures and data labels.
   ReC98 still keeps separate need the inline-asm stand-in, which only works
   without stack arguments (TCC merges consecutive cdecl cleanups).
 - To decompile a function in the middle of an assembly segment, move the
-  assembly after it into its own module (`th02/main/hittest.asm`) and link
+  assembly after it into its own module (`src/main/hittest.asm`) and link
   it after the new C++ object; segment contributions follow object order.
   Such a module must not use `.model` (it adds an empty `<FILE>_TEXT`
   segment that shifts DGROUP).
@@ -166,19 +165,19 @@ boundaries, which the target's relocation table records:
   `regist_m.cpp`). TCC moves `const` objects (and `const` one-dimensional
   character arrays into the literal pool) behind the non-const ones; ZUN's
   data was not `const`.
-- `th02/main_seg.asm` only declares MAIN's segments and goes first, so that
+- `src/main/units/main_seg.asm` only declares MAIN's segments and goes first, so that
   `main()`'s TU (with its data at `DGROUP:0090`) can precede
-  `th02_main.asm` while code segment #1 stays word-aligned.
+  `src/main/th02_main.asm` while code segment #1 stays word-aligned.
 - TLINK sizes the header from the far fixups it sees before shortening them.
   In the original, master.lib's calls into other library objects were such
   far calls, so `nopcall` emits a real far call for TH02 (under `NOSMART`,
   which keeps TASM from shortening it). This fixed OP's header size.
 - MAINE.EXE's original header starts the relocation table at `0x1C` and is
   only paragraph-aligned, unlike TLINK's `0x3E` layout (UNLZEXE writes this
-  layout). `Pipeline/exemin.c` rewrites TLINK's output that way after linking;
+  layout). `src/maine/exemin.c` rewrites TLINK's output that way after linking;
   image, relocation order, `SS:SP` and allocation fields stay TLINK's.
 - Moving data into TUs works tail-first: the last ZUN block in
-  `th02_main.asm`'s data belongs to the latest-linked TU still declaring it
+  `src/main/th02_main.asm`'s data belongs to the latest-linked TU still declaring it
   `extern`, so no new modules are needed.
 - TCC's data order within a TU: variables in definition order (including
   the anonymous data of local aggregate initializers, at their function),

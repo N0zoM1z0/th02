@@ -1,9 +1,9 @@
 # ReC98 compatibility boundary
 
-Product source under `src/` may need ReC98 headers before their declarations
-are localized. Such a dependency goes through a forwarding file here, named
-`compat/rec98/<upstream-path>`, containing only
-`#include "<upstream-relative-path>"` (or `include <path>` for TASM `.inc`).
-Do not copy declarations. Forwarders keep upstream provenance visible and are
-not counted as reconstructed TH02 source. ReC98 itself is not vendored; see
-`docs/REC98_IMPORT.md`.
+ReC98 infrastructure that TH02 needed changed, at its upstream path:
+`Tupfile.lua` (TH02's link lists, ONGCHK/ZUNINIT sources, the MAINE header
+rewrite), `ReC98.inc` (`nopcall` for TLINK's header sizing), `planar.h`
+(TH02's separate plane pointers) and `platform/array.hpp`.
+`config/rec98_overlay.toml` copies them over the pinned tree. They are ReC98
+files with local edits, not reconstructed TH02 source; product source lives in
+`src/`.

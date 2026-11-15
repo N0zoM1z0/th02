@@ -5,10 +5,10 @@ decompiled most of TH02 outside MAIN's gameplay. This repository starts from
 that work. It is pinned at `b6ba5b0a529edbb31efdf8c0e939263804f8ee47`, which
 was upstream `master` on 2026-11-14 and is also the TH03 pin.
 
-ReC98 has no top-level license, so its source is not copied here. Builds
-materialize the pinned tree with `git archive`, apply `patches/rec98/*.patch`,
-and run ReC98's own `build.bat`. Local fixes are small patches that explain
-why they are needed.
+ReC98 has no top-level license, so it is not vendored. Builds materialize the
+pinned tree with `git archive`, copy this repository's `src/` and
+`compat/rec98/` files over it (`config/rec98_overlay.toml`), and run ReC98's
+own `build.bat`. Only files we wrote or had to change live here.
 
 ## How the import was checked
 
@@ -30,12 +30,11 @@ the ZUNGEN packing.
 
 **Every ReC98 C/C++ unit in OP, MAIN and MAINE is byte-equal**, after one fix:
 
-- `th02/main/player/bomb.cpp`, `bomb_bft_8tiles_put_8()`: the original ends
+- `src/main/player/bomb.cpp`, `bomb_bft_8tiles_put_8()`: the original ends
   its loop with `cmp si, 8 / jl` (MAIN program offset 0xEEBB). Borland's
   `_SI` is unsigned, so `while(_SI < BYTE_DOTS)` emits `jb`.
-  `static_cast<int>(_SI)` emits `jl`. Fixed by
-  `patches/rec98/0001-th02-main-bomb-signed-loop.patch`, verified with a
-  TCC 4.02 probe and a full rebuild.
+  `static_cast<int>(_SI)` emits `jl`. Fixed in `src/main/player/bomb.cpp`,
+  verified with a TCC 4.02 probe and a full rebuild.
 
 The remaining differing bytes are all in ReC98's assembly files:
 
@@ -54,7 +53,7 @@ codegen for `_AL = _AH` emits `8A C4`. So ZUN wrote `sub_B3DA` and `sub_BCB1`
 as C/C++ functions with inline `asm`. Decompiling them that way fixes these
 bytes naturally; patching `db` bytes into the ASM would not be natural source.
 
-### Status after the local patches
+### Status after the local fixes
 
 The four alignment-fill rows are fixed by `db 0` before the `GRCG_CIRCLE_X`
 and `SUPER_PUT` includes and by inlining `vs[data].asm` with its original
@@ -77,7 +76,7 @@ At import time the EXE files still differed outside the program images:
   count *before* shortening same-segment far calls, so the original asm
   called its procedures with `nosmart` far calls (`nopcall` in `ReC98.inc`).
   MAINE's minimal header (relocations at 0x1C) comes from a post-link rewrite,
-  reproduced by `Pipeline/exemin.c`.
+  reproduced by `src/maine/exemin.c`.
 - Relocation order: TLINK emits fixups module by module in link order (TCC
   objects highest address first per 0x400-byte chunk, TASM objects
   ascending), so matching the order recovered ZUN's translation-unit
@@ -90,6 +89,6 @@ All four files are now byte-identical; see [the handoff](RE_HANDOFF.md).
 See [PROGRESS.md](PROGRESS.md) for the generated numbers. All of ZUN's
 compiled code and data in OP, MAIN and MAINE is C/C++. ZUN's own assembly is
 `pointnum_put()`, `shots_hittest()`, TH02's modified master.lib `pfopen()` and
-ZUN.COM's ZUNINIT (`th02/zuninit.asm`). ZUN.COM's ONGCHK (KAJA's PMD board
-probe) is assembled from `libs/kaja/ongchk.asm`, recovered in our TH03
+ZUN.COM's ZUNINIT (`src/zun/zuninit.asm`). ZUN.COM's ONGCHK (KAJA's PMD board
+probe) is assembled from `src/zun/ongchk.asm`, recovered in our TH03
 reconstruction; ZUN_RES and ZUNSOFT are ReC98 C++.
