@@ -191,7 +191,9 @@ boundaries, which the target's relocation table records:
 ## Next useful actions
 
 
-1. ZUN's three hand-written routines (`pointnum_put()`, `shots_hittest()`,
-   `pfopen()`): TCC with `-k-` omits the frame of a function whose body is
-   only inline asm, so a C++ TU might still reproduce them if the module's
-   `00` pad and relocation order can be matched.
+1. None for ZUN's three hand-written routines. A C++ wrapper of
+   `pointnum_put()`'s asm fails twice: TCC with `-k-` omits the frame, but it
+   saves SI/DI itself *before* the inline `enter 0, 0` (also with `-r-`), and
+   its code segments are byte-aligned (ACBP 28, while the target's module is
+   ACBP 48 after `pointnum.cpp` ends at the odd offset `0B16:1845`). Matching
+   either would need byte-encoded instructions or a `codestring` pad.
