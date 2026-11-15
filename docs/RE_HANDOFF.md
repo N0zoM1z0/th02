@@ -197,3 +197,7 @@ boundaries, which the target's relocation table records:
    its code segments are byte-aligned (ACBP 28, while the target's module is
    ACBP 48 after `pointnum.cpp` ends at the odd offset `0B16:1845`). Matching
    either would need byte-encoded instructions or a `codestring` pad.
+   `shots_hittest()` (after `stage3.cpp` ends at `0FAC:2D7B`) and TH02's
+   modified master.lib `pfopen()` (after pfint21 ends at `0000:3BFF`) show the
+   same word-aligned module pad; TCC emits byte-aligned code segments with
+   or without `-a2`, never `enter 0, 0`, and drops unused locals.
