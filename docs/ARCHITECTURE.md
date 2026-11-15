@@ -10,8 +10,10 @@ TH02 (東方封魔録 ～ the Story of Eastern Wonderland) ships four programs i
 | `MAINE.EXE` | ending and staff roll | MZ | 59,106 |
 | `ZUN.COM` | launcher: ZUNGEN-packed ONGCHK, ZUNINIT, ZUN_RES, ZUNSOFT | COM | 19,984 |
 
-Unlike TH03, `ZUN.COM` is a plain COM image. Its four payloads are stored by
-ReC98's `zungen` packer; `ZUNSOFT` is shared with TH01.
+Unlike TH03, `ZUN.COM` is a plain COM image. Its four payloads are built from
+source (ONGCHK and ZUNINIT in assembly, ZUN_RES and ZUNSOFT in C++; ZUNSOFT is
+shared with TH01) and stored by ReC98's `zungen` packer behind its launcher
+stub (`Pipeline/zun_stub.asm`).
 
 ## Identity
 
@@ -40,6 +42,6 @@ product link, whether it is C/C++ or ASM, and the CODE bytes it contributes
 in the linker map. Details and the verification result are in
 `docs/REC98_IMPORT.md`.
 
-Maintained product source under `src/` starts empty. Work that rewrites a
-ReC98 unit locally, or decompiles a part of `th02_main.asm`, lands there and
-must be compared against the target over its owned extent.
+All reconstruction work is a patch series on the pinned ReC98 tree
+(`patches/rec98/`), so it stays reviewable against ReC98 and can go upstream.
+`src/` holds no product source yet.

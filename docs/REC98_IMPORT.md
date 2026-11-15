@@ -68,34 +68,28 @@ One more ReC98 prototype inaccuracy surfaced while decompiling callers:
 `main_patnum_t`. Only `int, int` constant pairs are pushed as one
 `push imm32`, as the original callers do.
 
-### Container differences
+### Container differences (solved)
 
-Even with every program byte equal, the EXE files would still differ:
+At import time the EXE files still differed outside the program images:
 
 - Header size: the originals have 256/416/139 header paragraphs (OP/MAIN/MAINE)
-  against TLINK's 224/384/224. MAINE's relocation table starts at 0x1C, not
-  TLINK's 0x3E.
-- Relocation order: the sets are identical but the order differs in all three.
-  The order follows object and segment link order, so it is evidence about
-  ZUN's original translation-unit partition and link order.
+  against TLINK's 224/384/224. TLINK sizes the header from its far-fixup
+  count *before* shortening same-segment far calls, so the original asm
+  called its procedures with `nosmart` far calls (`nopcall` in `ReC98.inc`).
+  MAINE's minimal header (relocations at 0x1C) comes from a post-link rewrite,
+  reproduced by `Pipeline/exemin.c`.
+- Relocation order: TLINK emits fixups module by module in link order (TCC
+  objects highest address first per 0x400-byte chunk, TASM objects
+  ascending), so matching the order recovered ZUN's translation-unit
+  partition and link order.
 
-These belong to whole-product reconstruction and are not attributed to any
-unit.
+All four files are now byte-identical; see [the handoff](RE_HANDOFF.md).
 
 ## Coverage
 
-See [PROGRESS.md](PROGRESS.md) for the generated numbers. In short, all game
-segments of OP and almost all of MAINE are C/C++ byte-equal. MAIN is about one
-fifth C/C++, with about 58 KB of game code still in `th02_main.asm`.
-
-The asm files' `_TEXT` is counted with the library. It is mostly master.lib
-but also contains some ZUN code (`th02/formats/pfopen.asm`, `mpn_put_8` and
-others in MAIN). Splitting those out by public symbol is a small open task.
-
-## Open questions
-
-- Which linker or post-processing produced the original MAINE header layout?
-- Does the original relocation order match a specific TU partition that the
-  current ReC98 file split does not have?
-- Should the four alignment-fill cases be fixed in ReC98's assembly (`db 0`
-  instead of `even`), or wait until the surrounding code is decompiled?
+See [PROGRESS.md](PROGRESS.md) for the generated numbers. All of ZUN's
+compiled code and data in OP, MAIN and MAINE is C/C++. ZUN's own assembly is
+`pointnum_put()`, `shots_hittest()`, TH02's modified master.lib `pfopen()` and
+ZUN.COM's ZUNINIT (`th02/zuninit.asm`). ZUN.COM's ONGCHK (KAJA's PMD board
+probe) is assembled from `libs/kaja/ongchk.asm`, recovered in our TH03
+reconstruction; ZUN_RES and ZUNSOFT are ReC98 C++.

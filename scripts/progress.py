@@ -90,13 +90,14 @@ def svg(data: dict[str, dict[str, int]], zun: bool) -> str:
     for product in PRODUCTS + ("ZUN.COM",):
         rows.append(f'<g aria-label="{product}: exact authored bytes; ASM is ZUN\'s original assembly">')
         rows.append(f'<text x="24" y="{y + 7}" fill="#f4f4f5" {text} font-size="16" font-weight="600">{product}</text>')
-        rows.append(f'<rect x="{left}" y="{y}" width="{wl}" height="12" rx="4" fill="#353b52"/>')
+        if product != "ZUN.COM":
+            rows.append(f'<rect x="{left}" y="{y}" width="{wl}" height="12" rx="4" fill="#353b52"/>')
         rows.append(f'<rect x="{right}" y="{y}" width="{wr}" height="12" rx="4" fill="#353b52"/>')
         if product == "ZUN.COM":
-            rows.append(f'<text x="24" y="{y + 27}" fill="#c8cad2" {text} font-size="12">ZUNINIT + ZUN_RES</text>')
+            rows.append(f'<text x="24" y="{y + 27}" fill="#c8cad2" {text} font-size="12">4 packed programs</text>')
             if zun:
                 rows.append(f'<rect x="{right}" y="{y}" width="{wr}" height="12" fill="#55c7a6"/>')
-            rows.append(f'<text x="{left}" y="{y + 29}" fill="#c8cad2" {text} font-size="12">built with ReC98 zungen</text>')
+            rows.append(f'<text x="{left}" y="{y + 10}" fill="#c8cad2" {text} font-size="12">ZUNINIT, ONGCHK ASM · 2 C/C++ programs</text>')
             rows.append(f'<text x="{right}" y="{y + 29}" fill="#c8cad2" {text} font-size="12">whole file {"byte-equal" if zun else "differs"}</text>')
         else:
             v = auth[product]
@@ -146,6 +147,8 @@ def markdown(data: dict[str, dict[str, int]], zun: bool) -> str:
         "ASM game code is MAIN's `shots_hittest()` and `pointnum_put()`. ZUN wrote",
         "both as assembly modules (TASM fixup order, a word-aligned code segment,",
         "`enter 0, 0`), so they stay assembly. All other ZUN code is C/C++.",
+        "ZUN.COM packs ZUNINIT (ZUN's assembly), ONGCHK (KAJA's board probe,",
+        "assembled from recovered source), ZUN_RES and ZUNSOFT (C/C++).",
         "",
         "| Product | C/C++ byte-equal | C/C++ differing | ASM game code | Library | Game segments in C/C++ |",
         "| --- | ---: | ---: | ---: | ---: | ---: |",

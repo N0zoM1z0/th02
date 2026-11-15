@@ -3,13 +3,17 @@
 ## State
 
 - OP.EXE, MAIN.EXE, MAINE.EXE and ZUN.COM are identical to the originals as
-  whole files, from a cold build of the patch series (`session5-cold15`).
+  whole files, from a cold build of the patch series (`session5-cold16`).
 - Work lives on branch `th02-recon` of the ReC98 worktree
   `.analysis/work/rec98` and is exported as `patches/rec98/*.patch`
   (`git format-patch b6ba5b0a52..th02-recon`). `scripts/build_th02.py`
   applies the series to a cold `git archive` and rebuilds everything.
 
 All ZUN C code in MAIN is C++. What remains assembly:
+- ZUN.COM's ZUNINIT (`th02/zuninit.asm`, also TH03's `-2`): ZUN's resident
+  INT 59h/05h/06h handlers, now named and commented. ONGCHK is assembled from
+  `libs/kaja/ongchk.asm` (KAJA's code, recovered in our TH03 reconstruction)
+  instead of the prebuilt `ongchk.com`; TH03-TH05 still use the binary.
 - `pointnum_put()` (`th02/main/pointnum/num_put_m.asm`) and `pfopen()`
   (`th02/main/pf.asm`): hand-written by ZUN, like their TH04/TH05 siblings.
 - `sub_3F8A()` is C++ at the end of `dots.cpp`. Its near call into SHARED

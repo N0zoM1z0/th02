@@ -7,6 +7,8 @@ assembly files' `_TEXT`: master.lib plus ZUN's hand-written `pfopen()`.
 ASM game code is MAIN's `shots_hittest()` and `pointnum_put()`. ZUN wrote
 both as assembly modules (TASM fixup order, a word-aligned code segment,
 `enter 0, 0`), so they stay assembly. All other ZUN code is C/C++.
+ZUN.COM packs ZUNINIT (ZUN's assembly), ONGCHK (KAJA's board probe,
+assembled from recovered source), ZUN_RES and ZUNSOFT (C/C++).
 
 | Product | C/C++ byte-equal | C/C++ differing | ASM game code | Library | Game segments in C/C++ |
 | --- | ---: | ---: | ---: | ---: | ---: |
