@@ -34,13 +34,15 @@ Private inputs (original programs, Borland tools, Ghidra projects) are not in
 Git. With them in place:
 
 ```sh
-python3 scripts/import_targets.py /path/to/jp.hdi   # extracts and verifies HUMAROKU/
+python3 scripts/import_targets.py --retain-runtime-image /path/to/jp.hdi   # extracts and verifies HUMAROKU/
 python3 scripts/attest_toolchain.py
 python3 scripts/build_th02.py --run-id NAME --write-ledger
 python3 scripts/progress.py
 ```
 
-See [TOOLCHAIN.md](docs/TOOLCHAIN.md) and [GHIDRA.md](docs/GHIDRA.md).
+To play the rebuilt game on the original platform (PC-98 under DOSBox-X), see
+[DOS_BUILD.md](docs/DOS_BUILD.md). See also [TOOLCHAIN.md](docs/TOOLCHAIN.md)
+and [GHIDRA.md](docs/GHIDRA.md).
 
 ## Credits
 
