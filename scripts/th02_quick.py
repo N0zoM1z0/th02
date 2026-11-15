@@ -3,7 +3,8 @@
 
     th02_quick.py main [--asm] [th02/foo.cpp ...]
 
-Compiles the given TUs with the product's ReC98 flags, optionally reassembles
+Copies src/ and compat/rec98/ into the work tree (rec98_overlay.py), compiles
+the given TUs (ReC98 paths) with the product's ReC98 flags, optionally reassembles
 th02_<product>.asm, relinks from obj/th02/<product>.@l and compares the
 program image with the pinned original. Differences are attributed to the
 TLINK detailed-map module and nearest public symbol.
@@ -19,6 +20,7 @@ import subprocess
 import sys
 
 from lib.pc98 import parse_mz
+import rec98_overlay
 from lib.targets import find_artifact, load_target_manifest, read_verified_artifact
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -79,6 +81,7 @@ def main() -> int:
     parser.add_argument("--show", type=int, default=12)
     args = parser.parse_args()
     work, product = args.work, args.product
+    rec98_overlay.apply(work)
 
     if args.sources:
         response = work / "obj" / "quick.@c"

@@ -9,24 +9,24 @@ Agent workflow: follow the highest-priority requirements in [AGENTS.md](AGENTS.m
 This repository reconstructs the original Japanese PC-98 **Touhou 2: the
 Story of Eastern Wonderland** (`OP.EXE`, `MAIN.EXE`, `MAINE.EXE`, `ZUN.COM`).
 
-[Progress](docs/PROGRESS.md) · [Handoff](docs/RE_HANDOFF.md) · [ReC98 import](docs/REC98_IMPORT.md) · [Workflow](docs/RE_WORKFLOW.md) · [Architecture](docs/ARCHITECTURE.md)
+[Progress](docs/PROGRESS.md) · [Handoff](docs/RE_HANDOFF.md) · [Findings](docs/FINDINGS.md) · [ReC98 import](docs/REC98_IMPORT.md) · [Workflow](docs/RE_WORKFLOW.md) · [Architecture](docs/ARCHITECTURE.md) · [DOS build](docs/DOS_BUILD.md)
 
 ## State
 
 All four files (`OP.EXE`, `MAIN.EXE`, `MAINE.EXE`, `ZUN.COM`) rebuild
 byte-identical to the originals from a cold build of the pinned
 [ReC98](https://github.com/nmlgc/ReC98) revision plus this repository's
-source in `src/`. ReC98 had already decompiled most of TH02 outside MAIN's
-gameplay; this project decompiled the rest of MAIN, including the stage and
-boss code, and moved ZUN's remaining data into C++.
+source in `src/` (see [Architecture](docs/ARCHITECTURE.md)). ReC98 had
+already decompiled most of TH02 outside MAIN's gameplay; this project
+decompiled the rest of MAIN, including the stage and boss code, and moved
+ZUN's remaining data into C++.
 
 All of ZUN's compiled code and data is C/C++. Three routines stay as ZUN's
 own assembly because TCC cannot produce them: `pointnum_put()`,
 `shots_hittest()` and TH02's modified master.lib `pfopen()`, each a
-word-aligned TASM module (see [the handoff](docs/RE_HANDOFF.md)). master.lib
-and the Borland runtime are linked as libraries.
-
-Details are in [the import notes](docs/REC98_IMPORT.md).
+word-aligned TASM module (see [Findings](docs/FINDINGS.md#zuns-assembly-modules)).
+ZUN.COM's ZUNINIT is ZUN's assembly too. master.lib and the Borland runtime
+are linked as libraries.
 
 ## Build
 

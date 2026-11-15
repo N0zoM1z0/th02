@@ -1,7 +1,7 @@
 ; ReC98
 ; -----
-; master.lib's pfint21 and pf_str_ieq around TH02's modified pfopen(), split out
-; of th02_main.asm so that mpn_put_8() before them can be decompiled.
+; master.lib's pfint21 and pf_str_ieq around TH02's modified pfopen(), with
+; their data, as one module shared by OP, MAIN and MAINE.
 
 	.386
 	.model use16 large _TEXT

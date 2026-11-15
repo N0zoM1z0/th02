@@ -15,7 +15,9 @@
 | `progress.py` | `docs/PROGRESS.md` and `resources/progress.svg` from the ledger |
 | `ghidra.py ARTIFACT import\|check` | Headless Ghidra project import / attestation |
 | `factory_ghidra.py` | Read-only Factory query/decompile wrapper |
-| `inspect_omf.py`, `compare_artifacts.py` | OMF and MZ inspection helpers |
+| `th02_quick.py PRODUCT [--asm] [TU ...]` | Sync `src/`, compile, relink and compare one product in the work tree |
+| `th02_sbs.py PRODUCT START LEN` | Diff one function's target vs built disassembly (needs capstone) |
+| `inspect_omf.py` | OMF object inspection |
 | `shared_runtime.py` | Factory shared Ghidra/JDK/Wine launcher |
 | `preflight.py` | Environment, toolchain and target checks |
 | `ci.py` | Syntax and whitespace only |

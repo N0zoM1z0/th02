@@ -30,7 +30,7 @@ the ZUNGEN packing.
 
 **Every ReC98 C/C++ unit in OP, MAIN and MAINE is byte-equal**, after one fix:
 
-- `src/main/player/bomb.cpp`, `bomb_bft_8tiles_put_8()`: the original ends
+- `th02/main/player/bomb.cpp`, `bomb_bft_8tiles_put_8()`: the original ends
   its loop with `cmp si, 8 / jl` (MAIN program offset 0xEEBB). Borland's
   `_SI` is unsigned, so `while(_SI < BYTE_DOTS)` emits `jb`.
   `static_cast<int>(_SI)` emits `jl`. Fixed in `src/main/player/bomb.cpp`,

@@ -48,25 +48,28 @@ actual exactness, target identity, natural-source and state-isolation rules.
 
 Prioritize natural source recovery and exact native output. Read the short
 `docs/RE_HANDOFF.md`, relevant parts of `docs/RE_WORKFLOW.md`,
-`docs/ARCHITECTURE.md` and `docs/REC98_IMPORT.md`, and the local `th02-re`
-skill. Inspect Git; run preflight before target-dependent reconstruction or
-after target/runtime changes. Documentation and CI edits do not need it.
+`docs/ARCHITECTURE.md`, `docs/REC98_IMPORT.md` and `docs/FINDINGS.md`, and
+the local `th02-re` skill. Inspect Git; run preflight before target-dependent
+reconstruction or after target/runtime changes. Documentation and CI edits do
+not need it.
 
 - Use the Japanese targets pinned in `config/targets.toml` (`HUMAROKU/`
   OP.EXE, MAIN.EXE, MAINE.EXE, ZUN.COM), with `candidate-local-attested`
   provenance. Never substitute translated (`cn.hdi`), patched or
   reference-game binaries. Re-attest a Ghidra database before using it.
 - ReC98 (nmlgc and contributors) already decompiled much of TH02. Its pinned
-  revision is the starting point, credited in README and used through the
-  reference checkout and `compat/rec98` forwarders. ReC98 has no top-level
-  license, so do not bulk-copy its source into this tree. Its TH02 C/C++ units
-  count as **imported** only after a cold build reproduces the product and the
-  unit's owned bytes are checked; see `config/rec98_th02_units.csv`.
-  Remaining ReC98 ASM (`th02_main.asm` and the other `th02_*.asm`) is the open
-  reconstruction frontier.
-- Product source belongs in `src/op`, `src/main`, `src/maine`, `src/zun` and
-  proved `src/shared`. MAINE is the ending/staff roll. `.c`/`.cpp`/`.asm` are
-  TUs; `.inl` is a bounded include.
+  revision is the starting point, credited in README and built from the
+  reference checkout. ReC98 has no top-level license, so do not bulk-copy its
+  source into this tree: only files we wrote or had to change live here.
+  Every file in a link is checked per contribution against the original in
+  `config/rec98_th02_units.csv`. All four programs are whole-file identical;
+  ZUN's remaining assembly is listed in the handoff.
+- Our source belongs in `src/op`, `src/main`, `src/maine`, `src/zun` and
+  `src/shared` (used by more than one TH02 program); `units/` holds the
+  files a link names. ReC98 infrastructure we changed (`Tupfile.lua`,
+  `ReC98.inc`, `planar.h`, ...) goes in `compat/rec98/` at its upstream path.
+  `config/rec98_overlay.toml` maps every file to its ReC98 path; edit
+  `src/`, never only the private work tree. MAINE is the ending/staff roll.
 - Preserve 16-bit widths, ABI, segments, packing, x87 and compile/link order.
   Exact requires complete raw bytes, literal ordered relocations, reviewed
   ownership/layout and reproducible native output. No padding, target-byte
@@ -76,7 +79,8 @@ after target/runtime changes. Documentation and CI edits do not need it.
   original unchecked behavior; do not add defensive product fixes.
 - Rebuild/check the affected scope. Reuse an unchanged cold build; do not
   repeat full cold replay every turn.
-- Use direct local headless tools with DISPLAY/WAYLAND_DISPLAY empty. Limit
+- Use direct local headless tools with DISPLAY/WAYLAND_DISPLAY empty; only
+  DOSBox-X game runs use a private Xvfb display (`docs/DOS_BUILD.md`). Limit
   heavy work to one CPU at nice10; serialize Borland/Wine writers and preserve
   the local prefix. Keep private tools/targets/assets out of Git.
 - Keep useful findings in source, ledgers and the concise handoff. Do not turn
@@ -87,7 +91,9 @@ after target/runtime changes. Documentation and CI edits do not need it.
 Finish with affected checks and `git diff --check`. `python3 scripts/ci.py`
 is a fast, standard-library-only syntax/whitespace check, not a native gate.
 Documentation-only changes need only diff inspection and whitespace checking.
-Commit substantial progress using `gpt-6.1-sol: xxx` (current user-required format).
+Commit substantial progress with the prefix the user requires for your model
+(`claude-opus-5.5-high: xxx` for Claude Opus 5.5, `gpt-6.1-sol: xxx` for GPT
+agents).
 
 ## Shared Factory runtime
 

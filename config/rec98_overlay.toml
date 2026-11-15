@@ -34,7 +34,6 @@
 "src/main/midboss/midboss.hpp" = "th02/main/midboss/midboss.hpp"
 "src/main/mpn_put.cpp" = "th02/main/mpn_put.cpp"
 "src/main/null.hpp" = "th02/main/null.hpp"
-"src/main/pf.asm" = "th02/main/pf.asm"
 "src/main/pillar.cpp" = "th02/main/pillar.cpp"
 "src/main/player/bomb.cpp" = "th02/main/player/bomb.cpp"
 "src/main/player/bomb.hpp" = "th02/main/player/bomb.hpp"
@@ -81,6 +80,7 @@
 # shared
 "src/shared/hardware/keydelay.cpp" = "th02/hardware/keydelay.cpp"
 "src/shared/hiscore/regist.cpp" = "th02/hiscore/regist.cpp"
+"src/shared/pf.asm" = "th02/main/pf.asm"
 "src/shared/resident.hpp" = "th02/resident.hpp"
 "src/shared/units/input_rs.cpp" = "th02/input_rs.cpp"
 "src/shared/units/pi_load.cpp" = "th02/pi_load.cpp"

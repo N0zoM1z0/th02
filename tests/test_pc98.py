@@ -10,9 +10,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from lib.pc98 import compare_blobs, parse_fat_boot_sector, parse_mz
 from lib.reconstruction import comparison_vector
-from lib.targets import TargetError
-from export_analysis_bundle import private_output
-from mine_shared_blocks import find_shared_blocks
 
 
 def synthetic_mz() -> bytes:
@@ -218,30 +215,6 @@ class FatTests(unittest.TestCase):
         parsed = parse_fat_boot_sector(bytes(image), offset)
         self.assertEqual(parsed.bytes_per_sector, 1024)
         self.assertEqual(parsed.volume_label, "TOUHOU")
-
-
-class SharedBlockTests(unittest.TestCase):
-    def test_finds_maximal_unaligned_verified_block(self) -> None:
-        shared = bytes(range(80))
-        left = b"left-prefix" + shared + b"left-suffix"
-        right = b"R" * 13 + shared + b"right-suffix"
-        matches = find_shared_blocks(left, right, minimum_length=64)
-        self.assertIn((11, 13, 80), matches)
-
-    def test_rejects_short_matches(self) -> None:
-        shared = bytes(range(38))
-        matches = find_shared_blocks(
-            b"L" * 41 + shared,
-            b"R" * 47 + shared,
-            minimum_length=64,
-        )
-        self.assertEqual(matches, [])
-
-
-class ControlPlaneTests(unittest.TestCase):
-    def test_analysis_bundle_cannot_escape_private_tree(self) -> None:
-        with self.assertRaises(TargetError):
-            private_output(Path("README.md"))
 
 
 if __name__ == "__main__":

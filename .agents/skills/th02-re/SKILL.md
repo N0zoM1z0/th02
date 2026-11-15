@@ -12,6 +12,9 @@ Recover natural source: preserve ABI, 16-bit widths, segments and TU/link
 order. TCC inline `asm` and TASM encode some instructions differently; match
 the original's encoder instead of patching bytes.
 
-Build with `scripts/build_th02.py`, check every affected contribution in the
-ledger, record the finding, run `git diff --check`, and commit.
+Edit our files under `src/` (mapped to ReC98 paths by
+`config/rec98_overlay.toml`). Check one product with `scripts/th02_quick.py`,
+then cold-build with `scripts/build_th02.py --write-ledger` and check every
+affected contribution in the ledger. Record compiler findings in
+`docs/FINDINGS.md`, run `git diff --check`, and commit.
 Use direct headless tools, one CPU at nice10, serialized Borland writers.

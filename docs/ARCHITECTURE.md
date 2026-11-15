@@ -34,12 +34,11 @@ Wine executables come from the Factory shared store (`docs/SHARED_TOOLS.md`).
 
 ## ReC98 relationship
 
-ReC98 builds all four TH02 programs from a mix of decompiled C/C++ and
-remaining assembly. The pinned revision is checked out in `_reference/ReC98`
-(ignored) and materialized with `git archive` for every cold build. The import
-ledger `config/rec98_th02_units.csv` records each translation unit of each
-product link, whether it is C/C++ or ASM, and the CODE bytes it contributes
-in the linker map. Details and the verification result are in
+The pinned ReC98 revision is checked out in `_reference/ReC98` (ignored)
+and materialized with `git archive` for every cold build. The ledger
+`config/rec98_th02_units.csv` records every module contribution (CODE, DATA,
+BSS) of each product link from TLINK's map, whether it is C/C++ or ASM, and
+whether its bytes equal the original. The import is described in
 `docs/REC98_IMPORT.md`.
 
 Our source lives in this repository, separate from ReC98:
