@@ -3,7 +3,7 @@
 Agent workflow: follow the highest-priority requirements in [AGENTS.md](AGENTS.md). Use affected exact checks and searchable Markdown knowledge; ordinary notes do not require full CI or replay.
 
 <p align="center">
-  <img src="resources/progress.svg" alt="TH02 reconstruction progress by artifact">
+  <img src="resources/progress.svg" alt="TH02 authored byte exact reconstruction progress">
 </p>
 
 This repository reconstructs the original Japanese PC-98 **Touhou 2: the
@@ -11,18 +11,20 @@ Story of Eastern Wonderland** (`OP.EXE`, `MAIN.EXE`, `MAINE.EXE`, `ZUN.COM`).
 
 [Progress](docs/PROGRESS.md) · [Handoff](docs/RE_HANDOFF.md) · [ReC98 import](docs/REC98_IMPORT.md) · [Workflow](docs/RE_WORKFLOW.md) · [Architecture](docs/ARCHITECTURE.md)
 
-## Starting point
+## State
 
-Most of TH02 outside MAIN's gameplay has already been decompiled by
-[ReC98](https://github.com/nmlgc/ReC98). This project builds that pinned work
-with the original Borland toolchain and compares every linker-map contribution
-with the original binaries:
+All four files (`OP.EXE`, `MAIN.EXE`, `MAINE.EXE`, `ZUN.COM`) rebuild
+byte-identical to the originals from a cold build of the pinned
+[ReC98](https://github.com/nmlgc/ReC98) revision plus the patch series in
+`patches/rec98/`. ReC98 had already decompiled most of TH02 outside MAIN's
+gameplay; this project decompiled the rest of MAIN, including the stage and
+boss code, and moved ZUN's remaining data into C++.
 
-- `ZUN.COM` is byte-identical.
-- Every ReC98 C/C++ unit in `OP.EXE`, `MAIN.EXE` and `MAINE.EXE` is byte-equal
-  after one local fix (a signed loop compare in MAIN's bomb code).
-- The remaining differences are 19 bytes in ReC98's assembly files plus EXE
-  header/relocation order. Most of MAIN's gameplay is still assembly.
+All of ZUN's compiled code and data is C/C++. Three routines stay as ZUN's
+own assembly because TCC cannot produce them: `pointnum_put()`,
+`shots_hittest()` and TH02's modified master.lib `pfopen()`, each a
+word-aligned TASM module (see [the handoff](docs/RE_HANDOFF.md)). master.lib
+and the Borland runtime are linked as libraries.
 
 Details are in [the import notes](docs/REC98_IMPORT.md).
 

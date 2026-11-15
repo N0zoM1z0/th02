@@ -52,48 +52,84 @@ def totals() -> tuple[dict[str, dict[str, int]], bool]:
     return result, zun
 
 
+ZUN_ASM = ("th02/main/pointnum/num_put_m.asm", "th02/main/hittest.asm")
+
+
+def authored() -> dict[str, dict[str, int]]:
+    """Authored bytes per product: C/C++ CODE and DATA plus ZUN's own asm
+    modules. master.lib, the Borland runtime, BSS and padding are excluded."""
+    result = {p: {"c": 0, "asm": 0, "data": 0, "exact": 0, "total": 0, "tus": 0} for p in PRODUCTS}
+    with LEDGER.open(encoding="utf-8") as stream:
+        for row in csv.DictReader(stream):
+            v = result.get(row["product"])
+            n = int(row["length"])
+            if v is None or not n or row["class"] not in ("CODE", "DATA"):
+                continue
+            if row["kind"] == "rec98-c":
+                key = "c" if row["class"] == "CODE" else "data"
+                v["tus"] += row["class"] == "CODE"
+            elif row["module"].replace("\\", "/") in ZUN_ASM:
+                key = "asm" if row["class"] == "CODE" else "data"
+            else:
+                continue
+            exact = row["state"] == "byte-equal"
+            v[key + "_exact"] = v.get(key + "_exact", 0) + (n if exact else 0)
+            v[key] += n
+            v["total"] += n
+            v["exact"] += n if exact else 0
+    return result
+
+
 def svg(data: dict[str, dict[str, int]], zun: bool) -> str:
-    width, left, bar = 760, 150, 560
+    del data
+    auth = authored()
+    width, left, right, wl, wr = 788, 200, 488, 250, 270
+    text = 'font-family="sans-serif"'
     rows = []
-    y = 96
-    for product in PRODUCTS:
-        values = data[product]
-        game = values["source"] + values["differs"] + values["asm"]
-        share = 100 * values["source"] / game if game else 0
-        rows.append(f'<text x="24" y="{y + 13}" fill="#f4f4f5" font-family="sans-serif" font-size="16" font-weight="600">{product}</text>')
-        rows.append(f'<rect x="{left}" y="{y}" width="{bar}" height="16" rx="4" fill="#353b52"/>')
-        x = float(left)
-        total = sum(values.values())
-        for key in ("source", "differs", "asm", "library"):
-            w = bar * values[key] / total if total else 0
-            if w:
-                rows.append(f'<rect x="{x:.2f}" y="{y}" width="{w:.2f}" height="16" fill="{COLORS[key]}"/>')
-            x += w
-        rows.append(
-            f'<text x="{left}" y="{y + 36}" fill="#c8cad2" font-family="sans-serif" font-size="12">'
-            f'Game segments in C/C++, byte-equal: {values["source"]:,} / {game:,} B ({share:.1f}%) · '
-            f'ASM {values["asm"]:,} B · library {values["library"]:,} B</text>'
-        )
-        y += 64
-    rows.append(f'<text x="24" y="{y + 13}" fill="#f4f4f5" font-family="sans-serif" font-size="16" font-weight="600">ZUN.COM</text>')
-    rows.append(f'<text x="{left}" y="{y + 13}" fill="#c8cad2" font-family="sans-serif" font-size="12">'
-                f'{"Whole file byte-equal (ZUNINIT, ZUN_RES via ReC98 zungen)" if zun else "differs"}</text>')
-    y += 40
-    legend = []
-    x = 24
-    for key in ("source", "differs", "asm", "library"):
-        legend.append(f'<rect x="{x}" y="{y}" width="12" height="12" rx="2" fill="{COLORS[key]}"/>')
-        legend.append(f'<text x="{x + 18}" y="{y + 11}" fill="#c8cad2" font-family="sans-serif" font-size="12">{LABELS[key]}</text>')
-        x += 180
-    height = y + 36
+    y = 137
+    for product in PRODUCTS + ("ZUN.COM",):
+        rows.append(f'<g aria-label="{product}: exact authored bytes; ASM is ZUN\'s original assembly">')
+        rows.append(f'<text x="24" y="{y + 7}" fill="#f4f4f5" {text} font-size="16" font-weight="600">{product}</text>')
+        rows.append(f'<rect x="{left}" y="{y}" width="{wl}" height="12" rx="4" fill="#353b52"/>')
+        rows.append(f'<rect x="{right}" y="{y}" width="{wr}" height="12" rx="4" fill="#353b52"/>')
+        if product == "ZUN.COM":
+            rows.append(f'<text x="24" y="{y + 27}" fill="#c8cad2" {text} font-size="12">ZUNINIT + ZUN_RES</text>')
+            if zun:
+                rows.append(f'<rect x="{right}" y="{y}" width="{wr}" height="12" fill="#55c7a6"/>')
+            rows.append(f'<text x="{left}" y="{y + 29}" fill="#c8cad2" {text} font-size="12">built with ReC98 zungen</text>')
+            rows.append(f'<text x="{right}" y="{y + 29}" fill="#c8cad2" {text} font-size="12">whole file {"byte-equal" if zun else "differs"}</text>')
+        else:
+            v = auth[product]
+            code = v["c"] + v["asm"]
+            rows.append(f'<text x="24" y="{y + 27}" fill="#c8cad2" {text} font-size="12">{v["tus"]} C/C++ TUs</text>')
+            if code:
+                rows.append(f'<rect x="{left}" y="{y}" width="{wl * v.get("c_exact", 0) / code:.2f}" height="5" fill="#9b6de3"/>')
+                rows.append(f'<rect x="{left}" y="{y + 7}" width="{wl * (v.get("c_exact", 0) + v.get("asm_exact", 0)) / code:.2f}" height="5" fill="#e0af68"/>')
+            if v["total"]:
+                rows.append(f'<rect x="{right}" y="{y}" width="{wr * v["exact"] / v["total"]:.2f}" height="12" fill="#55c7a6"/>')
+            share = 100 * v["exact"] / v["total"] if v["total"] else 0
+            rows.append(f'<text x="{left}" y="{y + 29}" fill="#c8cad2" {text} font-size="12">C/C++ {v["c"]:,} B · ASM {v["asm"]:,} B</text>')
+            rows.append(f'<text x="{right}" y="{y + 29}" fill="#c8cad2" {text} font-size="12">{share:.3f}% · {v["exact"]:,} / {v["total"]:,} B</text>')
+        rows.append("</g>")
+        y += 76
+    exact = sum(v["exact"] for v in auth.values())
+    total = sum(v["total"] for v in auth.values())
+    y -= 15
+    rows.append(f'<path d="M24 {y} H764" stroke="#353b52"/>')
+    rows.append(f'<text x="24" y="{y + 28}" fill="#f4f4f5" {text} font-size="13" font-weight="600">'
+                f'Exact authored bytes: {exact:,} / {total:,} B ({100 * exact / total:.3f}%)</text>')
+    rows.append(f'<text x="24" y="{y + 56}" fill="#c8cad2" {text} font-size="12">Details: docs/PROGRESS.md · goal 100%</text>')
+    height = y + 84
     return "\n".join([
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-label="TH02 reconstruction progress">',
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-label="TH02 exact authored reconstruction progress">',
         "  <title>TH02 reconstruction progress by artifact</title>",
-        "  <desc>CODE bytes per linker-map contribution, compared with the original Japanese executables. Generated by scripts/progress.py.</desc>",
+        "  <desc>Exact authored bytes are C/C++ CODE and DATA plus ZUN's original ASM modules. master.lib, the Borland runtime, BSS and padding are excluded. Generated by scripts/progress.py.</desc>",
         f'  <rect x="0.5" y="0.5" width="{width - 1}" height="{height - 1}" rx="16" fill="#1f2335" stroke="#353b52"/>',
-        '  <text x="24" y="39" fill="#f4f4f5" font-family="sans-serif" font-size="22" font-weight="600">TH02 reconstruction progress</text>',
-        '  <text x="24" y="64" fill="#c8cad2" font-family="sans-serif" font-size="13">CODE bytes by linker-map contribution · pinned ReC98 + local patches vs. original binaries</text>',
-        *("  " + line for line in rows + legend),
+        f'  <text x="24" y="39" fill="#f4f4f5" {text} font-size="22" font-weight="600">TH02 reconstruction progress</text>',
+        f'  <text x="24" y="64" fill="#c8cad2" {text} font-size="13">Authored bytes · C/C++ and ZUN\'s original ASM · master.lib, runtime, BSS and padding excluded</text>',
+        f'  <text x="{left}" y="103" fill="#f4f4f5" {text} font-size="13" font-weight="600">Exact CODE · C/C++ / with ASM</text>',
+        f'  <text x="{right}" y="103" fill="#f4f4f5" {text} font-size="13" font-weight="600">Exact authored bytes</text>',
+        *("  " + line for line in rows),
         "</svg>",
         "",
     ])
